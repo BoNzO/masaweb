@@ -1,32 +1,40 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Plus,
-  RefreshCw,
   TrendingUp,
-  BarChart3,
+  Calendar,
   Settings,
-  Trash2,
+  X,
+  Plus,
+  ArrowRight,
+  TrendingDown,
+  History as HistoryIcon,
+  Play,
   RotateCcw,
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  ArrowUpRight,
+  ArrowDownRight,
+  Save,
+  Layout,
+  Table as TableIcon,
+  ChevronRight,
+  Target,
+  PiggyBank,
+  Coins,
+  Trophy,
   ChevronDown,
   ChevronUp,
   CheckCircle,
-  Trophy,
-  XCircle,
   PieChart,
-  Coins,
   CheckSquare,
   Square,
-  Target,
   AlertOctagon,
   Hash,
-  ArrowRight,
   MinusCircle,
   Calculator,
-  PiggyBank,
-  Calendar,
   LifeBuoy,
-  AlertTriangle,
-  ArrowDownRight,
 } from 'lucide-react';
 import {
   LineChart,
@@ -43,31 +51,63 @@ import {
 const roundTwo = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
 const MasanielloCompound = () => {
-  const [config, setConfig] = useState({
-    initialCapital: 1000,
-    quota: 3.0,
-    totalEvents: 14,
-    expectedWins: 5,
-    accumulationPercent: 0,
+  const [config, setConfig] = useState(() => {
+    const saved = localStorage.getItem('masa_config');
+    const defaultConfig = {
+      initialCapital: 1000,
+      quota: 3.0,
+      totalEvents: 14,
+      expectedWins: 5,
+      accumulationPercent: 10,
+      weeklyTargetPercentage: 10,
+    };
+    return saved ? { ...defaultConfig, ...JSON.parse(saved) } : defaultConfig;
   });
 
-  const [currentPlan, setCurrentPlan] = useState(null);
-  const [history, setHistory] = useState([]);
+  const [currentPlan, setCurrentPlan] = useState(() => {
+    const saved = localStorage.getItem('masa_current_plan');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [history, setHistory] = useState<any[]>(() => {
+    const saved = localStorage.getItem('masa_history');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [showConfig, setShowConfig] = useState(true);
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [rescueEventsToAdd, setRescueEventsToAdd] = useState(2);
-
-  // GESTIONE SEQUENZA PARZIALE
-  const [sequence, setSequence] = useState([]);
+  const [sequence, setSequence] = useState<any[]>([]);
   const [isSequenceActive, setIsSequenceActive] = useState(false);
+  const [rulesExpanded, setRulesExpanded] = useState(false);
 
-  const [activeRules, setActiveRules] = useState([
-    'first_win',
-    'back_positive',
-    'profit_90',
-    'all_wins',
-    'impossible',
-  ]);
+  const [activeRules, setActiveRules] = useState(() => {
+    const saved = localStorage.getItem('masa_active_rules');
+    return saved ? JSON.parse(saved) : [
+      'first_win',
+      'back_positive',
+      'profit_90',
+      'all_wins',
+      'impossible',
+      'auto_bank_100',
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('masa_config', JSON.stringify(config));
+  }, [config]);
+
+  useEffect(() => {
+    localStorage.setItem('masa_current_plan', JSON.stringify(currentPlan));
+  }, [currentPlan]);
+
+  useEffect(() => {
+    localStorage.setItem('masa_history', JSON.stringify(history));
+  }, [history]);
+
+  useEffect(() => {
+    localStorage.setItem('masa_active_rules', JSON.stringify(activeRules));
+  }, [activeRules]);
 
   const RULES = [
     {
@@ -81,6 +121,14 @@ const MasanielloCompound = () => {
     { id: 'profit_90', label: '90% utile netto raggiunto → Reset ciclo' },
     { id: 'all_wins', label: 'Tutte vittorie completate → Reset ciclo' },
     { id: 'impossible', label: 'Vittorie impossibili → Chiusura fallimento' },
+    {
+      id: 'auto_bank_100',
+      label: 'Accantona al raggiungimento del 100% del target settimanale',
+    },
+    {
+      id: 'smart_auto_close',
+      label: 'Chiusura protettiva (>65% eventi e >90% capitale)',
+    },
   ];
 
   const toggleRule = (ruleId) => {
@@ -224,16 +272,40 @@ const MasanielloCompound = () => {
 
   const transitionToNextPlan = (closingPlan, reason, ruleId) => {
     let amountToBank = 0;
+    let milestonesBanked = 0;
 
-    if (closingPlan.currentCapital > 0 && config.accumulationPercent > 0) {
-      const theoreticalAmount =
-        closingPlan.currentCapital * (config.accumulationPercent / 100);
-      const maxBankable = closingPlan.currentCapital - closingPlan.startCapital;
+    const cycleProfit = roundTwo(closingPlan.currentCapital - closingPlan.startCapital);
 
-      if (maxBankable > 0) {
-        amountToBank = roundTwo(Math.min(theoreticalAmount, maxBankable));
-      } else {
-        amountToBank = 0;
+    // Cumulative Milestone Banking logic
+    if (reason === 'auto_bank_100' && config.accumulationPercent > 0 && cycleProfit > 0) {
+      // 1. Calculate how many milestones we've banked so far
+      const bankedMilestoneCountBefore = history.reduce(
+        (acc, p) => acc + (p.milestonesBanked || (p.status === 'auto_bank_100' ? 1 : 0)),
+        0
+      );
+
+      // 2. Calculate how many milestones we are at right now (cumulative profit)
+      const totalBankedSoFar = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
+      let absoluteStartCap = config.initialCapital;
+      if (history.length > 0) absoluteStartCap = history[0].startCapital;
+
+      const currentTotalProfit = roundTwo(closingPlan.currentCapital + totalBankedSoFar - absoluteStartCap);
+      const targetValue = (config.weeklyTargetPercentage / 100) * (closingPlan?.startCapital || config.initialCapital);
+      const targetMilestoneCount = Math.floor(currentTotalProfit / targetValue);
+
+      // 3. Bank for ALL pending milestones, but limited by THIS cycle's profit
+      const milestonesToBankNow = Math.max(0, targetMilestoneCount - bankedMilestoneCountBefore);
+
+      if (milestonesToBankNow > 0) {
+        // Calculate amount: milestones * target * percentage
+        // But we can't bank more than the cycle profit
+        const theoreticalAmount = milestonesToBankNow * targetValue * (config.accumulationPercent / 100);
+        amountToBank = Math.min(cycleProfit, roundTwo(theoreticalAmount));
+
+        // If we limited by cycleProfit, calculate how many milestones we ACTUALLY covered
+        // Actually, if we bank less money, we still count the milestones as "hit"
+        // because the rule won't trigger again unless profit increases further.
+        milestonesBanked = milestonesToBankNow;
       }
     }
 
@@ -244,6 +316,7 @@ const MasanielloCompound = () => {
       status: reason,
       triggeredRule: ruleId,
       accumulatedAmount: amountToBank,
+      milestonesBanked: milestonesBanked,
     };
 
     setHistory([...history, closedPlanWithStats]);
@@ -251,8 +324,13 @@ const MasanielloCompound = () => {
   };
 
   const resetCurrentPlan = () => {
-    if (!currentPlan) return;
-    transitionToNextPlan(currentPlan, 'manual_reset', 'manual_reset');
+    if (confirm('Sei sicuro di voler resettare tutto lo storico? La configurazione rimarrà invariata.')) {
+      setHistory([]);
+      setCurrentPlan(null);
+      setIsSequenceActive(false);
+      setSequence([]);
+      setShowConfig(true);
+    }
   };
 
   const closeCurrentCycle = () => {
@@ -260,23 +338,6 @@ const MasanielloCompound = () => {
     transitionToNextPlan(currentPlan, 'manual_close', 'manual_close');
   };
 
-  const resetAllCycles = () => {
-    if (!window.confirm('Sei sicuro di voler resettare tutti i cicli?')) return;
-    if (currentPlan)
-      setHistory([
-        ...history,
-        {
-          ...currentPlan,
-          status: 'manual_reset',
-          triggeredRule: 'manual_reset',
-          accumulatedAmount: 0,
-        },
-      ]);
-    setCurrentPlan(null);
-    setHistory([]);
-    setExpandedHistory(null);
-    setShowConfig(true);
-  };
 
   const resetPlan = (reason, ruleId, finalPlan) => {
     transitionToNextPlan(finalPlan, reason, ruleId);
@@ -454,6 +515,61 @@ const MasanielloCompound = () => {
     setIsSequenceActive(false);
 
     if (!isVoid) {
+      // 1. PRIORITY: Cumulative Milestone Banking logic
+      const totalBankedSoFar = history.reduce(
+        (acc, p) => acc + (p.accumulatedAmount || 0),
+        0
+      );
+
+      let absoluteStartCap = config.initialCapital;
+      if (history.length > 0) {
+        absoluteStartCap = history[0].startCapital;
+      } else if (finalPlan) {
+        absoluteStartCap = finalPlan.startCapital;
+      }
+
+      const currentTotalProfit = roundTwo(
+        finalPlan.currentCapital + totalBankedSoFar - absoluteStartCap
+      );
+
+      const bankedMilestoneCount = history.reduce(
+        (acc, p) => acc + (p.milestonesBanked || (p.status === 'auto_bank_100' ? 1 : 0)),
+        0
+      );
+
+      const targetValue = (config.weeklyTargetPercentage / 100) * (currentPlan?.startCapital || config.initialCapital);
+      const targetMilestoneCount = Math.floor(currentTotalProfit / targetValue);
+
+      // CRITICAL FIX: Only trigger auto-bank if:
+      // 1. We have pending milestones
+      // 2. We just had a WIN (progress) or the cycle is already significantly profitable
+      const cycleProfit = finalPlan.currentCapital - finalPlan.startCapital;
+
+      if (
+        activeRules.includes('auto_bank_100') &&
+        targetMilestoneCount > bankedMilestoneCount &&
+        targetValue > 0 &&
+        isFullWin && // Specifically: only trigger forced exit AFTER A WIN
+        cycleProfit > 0.01
+      ) {
+        resetPlan('auto_bank_100', 'auto_bank_100', finalPlan);
+        return;
+      }
+
+      // 2. PRIORITY: Failure/Impossible situations
+      if (
+        activeRules.includes('impossible') &&
+        (nextEventsLeft < nextWinsLeft ||
+          (nextEventsLeft === 0 && nextWinsLeft > 0))
+      ) {
+        finalPlan.status = 'failed';
+        finalPlan.triggeredRule = 'impossible';
+        setHistory([...history, finalPlan]);
+        setCurrentPlan(null);
+        return;
+      }
+
+      // 3. PRIORITY: Standard close rules
       if (
         activeRules.includes('first_win') &&
         isFullWin &&
@@ -482,6 +598,21 @@ const MasanielloCompound = () => {
         resetPlan('completed', 'all_wins', finalPlan);
         return;
       }
+
+      // 4. Smart Auto-Close Rule
+      const eventsPlayed = finalPlan.totalEvents - nextEventsLeft;
+      const progressPercent = eventsPlayed / finalPlan.totalEvents;
+      const capitalRetention = finalPlan.currentCapital / finalPlan.startCapital;
+
+      if (
+        activeRules.includes('smart_auto_close') &&
+        progressPercent > 0.65 &&
+        capitalRetention > 0.90
+      ) {
+        resetPlan('smart_auto_close', 'smart_auto_close', finalPlan);
+        return;
+      }
+
       if (
         activeRules.includes('impossible') &&
         (nextEventsLeft < nextWinsLeft ||
@@ -563,6 +694,7 @@ const MasanielloCompound = () => {
       absoluteStartCapital,
       totalProfit,
       totalGrowth,
+      totalWorth,
       totalBanked,
       estimatedDays,
       completedCycles: history.filter((p) =>
@@ -652,6 +784,55 @@ const MasanielloCompound = () => {
     return data;
   };
 
+  const getWeeklyHeatmapData = () => {
+    // Usiamo esattamente la stessa logica del box "Profitto Totale"
+    const currentCapital = currentPlan
+      ? (currentPlan as any).currentCapital
+      : config.initialCapital;
+
+    const totalBanked = (history as any[]).reduce(
+      (acc, p) => acc + (p.accumulatedAmount || 0),
+      0
+    );
+
+    let absoluteStartCapital = config.initialCapital;
+    if (history.length > 0) {
+      absoluteStartCapital = (history[0] as any).startCapital;
+    } else if (currentPlan) {
+      absoluteStartCapital = (currentPlan as any).startCapital;
+    }
+
+    const totalProfit = currentCapital + totalBanked - absoluteStartCapital;
+    const target = (config.weeklyTargetPercentage / 100) * (currentPlan?.startCapital || config.initialCapital);
+    const yLevels = ['80-100%', '60-80%', '40-60%', '20-40%', '0-20%'];
+
+    return new Array(12).fill(0).map((_, i) => {
+      const bucketMin = i * target;
+      let bucketProfit = 0;
+      if (totalProfit > bucketMin) {
+        bucketProfit = Math.min(totalProfit - bucketMin, target);
+      }
+
+      const percentage = (bucketProfit / target) * 100;
+
+      return {
+        key: `S${i + 1}`,
+        percentage: percentage,
+        data: yLevels.map((level, levelIdx) => {
+          const thresholdPercent = (4 - levelIdx) * 20;
+          const isActive = levelIdx === 4
+            ? percentage > 0.01
+            : percentage >= thresholdPercent;
+
+          return {
+            key: level,
+            data: isActive ? 1 : 0,
+          };
+        }),
+      };
+    });
+  };
+
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
@@ -686,57 +867,422 @@ const MasanielloCompound = () => {
       ? (previewProfit / config.initialCapital) * 100
       : 0;
 
-  return (
-    <div className="w-full max-w-6xl mx-auto p-6 bg-gradient-to-br from-slate-900 to-slate-800 text-white min-h-screen">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2 flex items-center gap-3">
-          <TrendingUp className="text-green-400" />
-          Masaniello con Interesse Composto
-        </h1>
-      </div>
+  // Calculate weekly target as percentage of current capital
+  const getWeeklyTarget = () => {
+    if (!currentPlan) {
+      return (config.weeklyTargetPercentage / 100) * config.initialCapital;
+    }
+    return (config.weeklyTargetPercentage / 100) * currentPlan.startCapital;
+  };
 
-      {/* TOP STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 shadow-lg">
-          <div className="text-slate-400 text-xs mb-1">Capitale Corrente</div>
-          <div className="text-xl font-bold text-green-400 flex items-center gap-2">
-            €{stats.currentCapital.toFixed(2)}
-            <span className="text-sm text-slate-500 font-normal">
-              / €
-              {currentPlan
-                ? currentPlan.startCapital.toFixed(2)
-                : config.initialCapital.toFixed(2)}
-            </span>
+  // Render Piano Attivo - extracted for reusability in responsive layout
+  const renderPianoAttivo = () => {
+    if (!currentPlan || !progressStats) return null;
+
+    return (
+      <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden">
+        {/* Subtle Background Glow */}
+        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 blur-[100px] pointer-events-none" />
+
+        {/* RESCUE MODE BANNER */}
+        {progressStats.isCritical && !currentPlan.isRescued && (
+          <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-red-600 to-rose-700 text-white p-5 rounded-t-xl shadow-lg border-b border-red-500/30 animate-in slide-in-from-top-2">
+            <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md">
+                  <AlertTriangle size={24} className="text-yellow-300" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-lg tracking-tight uppercase">
+                    Soglia Critica Raggiunta
+                  </div>
+                  <div className="text-sm text-red-100/90 leading-tight">
+                    Rischio fallimento elevato. Attiva il salvagente per ridurre la varianza.
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-black/20 p-3 rounded-lg border border-white/10 flex flex-col gap-2 min-w-[280px]">
+                <div className="flex justify-between items-center text-xs uppercase tracking-wider font-semibold opacity-80">
+                  <span>Target Attuale</span>
+                  <span>€{currentPlan.targetCapital.toFixed(2)}</span>
+                </div>
+                {rescueProjection && (
+                  <div className="flex justify-between items-center text-sm font-bold text-yellow-300">
+                    <span className="flex items-center gap-1">
+                      <ArrowDownRight size={14} /> Nuovo Target
+                    </span>
+                    <span className="text-xl">
+                      €{rescueProjection.target.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                <div className="h-px bg-white/10 my-1"></div>
+                <div className="flex gap-2 items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase opacity-60">
+                      Step:
+                    </span>
+                    <select
+                      value={rescueEventsToAdd}
+                      onChange={(e) => setRescueEventsToAdd(Number(e.target.value))}
+                      className="bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-md px-2 py-1 text-xs font-bold outline-none cursor-pointer transition-colors"
+                    >
+                      {[1, 2, 3, 4, 5].map(v => (
+                        <option key={v} value={v} className="bg-slate-800 text-white">+{v} Eventi</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    onClick={activateRescueMode}
+                    className="bg-yellow-400 hover:bg-yellow-300 text-red-900 px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg hover:shadow-yellow-400/20 transition-all hover:scale-105"
+                  >
+                    <LifeBuoy size={16} /> Attiva
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="mt-2 text-xs text-slate-500 flex items-center gap-1">
-            <Calendar size={12} />
-            <span>Giorni trascorsi: {stats.estimatedDays}</span>
+        )}
+
+        {currentPlan.isRescued && (
+          <div className="absolute top-4 right-4 bg-orange-500/10 border border-orange-500/50 text-orange-400 px-3 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase flex items-center gap-2 animate-pulse z-20">
+            <LifeBuoy size={14} /> Salvagente Attivo
+          </div>
+        )}
+
+        <div className="flex justify-between items-center mb-8 relative z-10">
+          <div>
+            <h2 className="text-2xl font-black flex items-center gap-3 tracking-tighter">
+              PIANO ATTIVO
+              {currentPlan.isRescued && (
+                <span className="text-[10px] bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded px-2 py-0.5 tracking-tighter font-bold">
+                  RESCUED
+                </span>
+              )}
+            </h2>
+            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-0.5">
+              Gestione Masa attiva
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs px-3 py-2 bg-slate-900/50 rounded-lg border border-slate-700/50 font-bold text-blue-400 flex items-center gap-2">
+              <Calendar size={14} /> {currentPlan.totalEvents}E / {currentPlan.expectedWins}V
+            </div>
           </div>
         </div>
 
-        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 shadow-lg">
-          <div className="text-slate-400 text-xs mb-1">
-            Profitto Totale (+Accantonato)
-          </div>
-          <div
-            className={`text-xl font-bold ${
-              stats.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'
+        {/* STATS CARDS */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 relative z-10">
+          {[
+            { label: 'Capitale', value: `€${currentPlan.currentCapital.toFixed(0)}`, icon: <PiggyBank size={18} />, color: 'text-white' },
+            { label: 'Eventi', value: `${progressStats.eventsPlayed}/${currentPlan.totalEvents}`, icon: <Calendar size={18} />, color: 'text-blue-400' },
+            { label: 'Vittorie', value: `${progressStats.structuralWins}/${currentPlan.expectedWins}`, icon: <Trophy size={18} />, color: 'text-green-400' },
+            { label: 'Errori', value: `${progressStats.structuralLosses}/${progressStats.totalAllowedErrors}`, icon: <XCircle size={18} />, color: progressStats.isCritical ? 'text-red-500 animate-pulse' : 'text-red-400' },
+          ].map((stat, i) => (
+            <div key={i} className={`bg-gradient-to-br from-slate-800 to-slate-900 border ${stat.label === 'Errori' && progressStats.isCritical ? 'border-red-500/30' : 'border-slate-700/50'} rounded-xl p-4 transition-all hover:border-slate-600 group`}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`p-1.5 rounded-lg bg-slate-900/50 ${stat.color} group-hover:scale-110 transition-transform`}>
+                  {stat.icon}
+                </div>
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{stat.label}</span>
+              </div>
+              <div className={`text-2xl font-medium ${stat.color} tracking-tight`}>{stat.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* BETTING BOX */}
+        <div
+          className={`p-4 rounded-2xl mb-5 shadow-2xl relative overflow-hidden transition-all duration-500 group ${isSequenceActive
+            ? 'bg-gradient-to-br from-indigo-700 to-slate-900 border-2 border-indigo-500/30'
+            : 'bg-gradient-to-br from-blue-600 to-blue-800 border-2 border-white/5'
             }`}
-          >
-            {stats.totalProfit >= 0 ? '+' : ''}€{stats.totalProfit.toFixed(2)}
+        >
+          <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="text-xs text-white uppercase tracking-[0.2em] flex items-center gap-2 font-black">
+              <RefreshCw size={14} className={isSequenceActive ? 'animate-spin-slow' : ''} />
+              {isSequenceActive
+                ? `Sequenza (Step ${sequence.length + 1}/2)`
+                : 'Prossima Puntata'}
+            </div>
+
+            <div className="flex items-baseline gap-1">
+              <span className="text-lg font-medium text-white/50">€</span>
+              <span className="text-3xl font-medium tracking-tighter text-white drop-shadow-lg">
+                {isSequenceActive
+                  ? sequence[0].stake.toFixed(2)
+                  : targetStake.toFixed(2)}
+              </span>
+              {isSequenceActive && (
+                <span className="text-[10px] bg-black/20 text-indigo-100 px-2 py-0.5 rounded-full ml-3 font-bold tracking-tight backdrop-blur-sm">
+                  Quota 50%
+                </span>
+              )}
+            </div>
           </div>
-          <div className="text-xs text-slate-500 mt-1 flex justify-between items-center">
-            <span>
-              Su Cap. Iniziale: €{stats.absoluteStartCapital.toFixed(2)}
-            </span>
-            <span
-              className={`${
-                stats.totalGrowth >= 0 ? 'text-green-400' : 'text-red-400'
-              } font-bold`}
+
+          {/* Sequence Visualizer - Only if active */}
+          {isSequenceActive && (
+            <div className="relative z-10 flex gap-1.5 mt-3 pt-3 border-t border-white/10">
+              {sequence.map((step, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-bold tracking-wider border ${step.isWin
+                    ? 'bg-green-500/20 border-green-500/50 text-green-300'
+                    : 'bg-red-500/20 border-red-500/50 text-red-300'
+                    }`}
+                >
+                  {step.isWin ? <CheckCircle size={10} /> : <XCircle size={10} />}
+                  {idx + 1}°: {step.isWin ? 'V' : 'P'}
+                </div>
+              ))}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-bold tracking-wider border border-white/10 bg-white/5 text-white/30 animate-pulse">
+                2° STEP...
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* COLLAPSIBLE RULES */}
+        <div className="mb-6">
+          <button
+            onClick={() => setRulesExpanded(!rulesExpanded)}
+            className="w-full flex items-center justify-between px-5 py-3.5 bg-slate-900/40 hover:bg-slate-900/60 border border-slate-700/50 rounded-xl transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className={`p-1.5 rounded-lg ${rulesExpanded ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-500'}`}>
+                <CheckCircle size={14} />
+              </div>
+              <span className="font-bold text-xs text-slate-300">
+                Regole Automatiche Attive: <span className="text-white ml-1">{activeRules.length}</span>
+              </span>
+            </div>
+            <ChevronDown
+              size={16}
+              className={`text-slate-500 group-hover:text-slate-300 transition-transform duration-300 ${rulesExpanded ? 'rotate-180' : ''
+                }`}
+            />
+          </button>
+          {rulesExpanded && (
+            <div className="mt-2 p-4 bg-slate-900/60 border border-slate-700/50 rounded-xl space-y-3 animate-in fade-in zoom-in-95">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {RULES.map((rule) => {
+                  const status = getRuleStatus(rule.id);
+                  return (
+                    <div
+                      key={rule.id}
+                      onClick={() => toggleRule(rule.id)}
+                      className={`px-3 py-2 rounded-lg text-[10px] flex items-center gap-3 cursor-pointer border transition-all ${status.enabled
+                        ? 'bg-slate-800 border-slate-600 text-slate-200 hover:border-slate-500 shadow-sm'
+                        : 'bg-slate-900/30 border-slate-800 text-slate-600 opacity-40 hover:opacity-100 hover:bg-slate-900/50'
+                        }`}
+                    >
+                      <div className={`transition-all ${status.enabled ? 'scale-110 text-green-500' : 'scale-100 text-slate-700'}`}>
+                        {status.enabled ? <CheckSquare size={14} /> : <Square size={14} />}
+                      </div>
+                      <span className={`font-medium ${!status.enabled ? 'line-through opacity-50' : ''}`}>
+                        {rule.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* CONTROLS */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          {!isSequenceActive ? (
+            <>
+              <button
+                onClick={() => handleFullBet(true)}
+                className="group relative overflow-hidden py-4 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-green-800 active:border-b-0"
+              >
+                <div className="flex flex-col items-center">
+                  <span className="flex items-center gap-2"><CheckCircle size={18} /> VINTA</span>
+                  <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold">100% TARGET</span>
+                </div>
+              </button>
+              <button
+                onClick={() => handlePartialStep(true)}
+                className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98]"
+              >
+                <div className="flex flex-col items-center">
+                  <span className="flex items-center gap-2 text-green-400"><TrendingUp size={18} /> PARZIALE</span>
+                  <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">
+                    €{partialBtnAmount.toFixed(2)} (50%)
+                  </span>
+                </div>
+              </button>
+              <button
+                onClick={() => handleFullBet(false)}
+                className="group relative overflow-hidden py-4 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-red-900 active:border-b-0"
+              >
+                <div className="flex flex-col items-center text-white">
+                  <span className="flex items-center gap-2"><XCircle size={18} /> PERSA</span>
+                  <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">Fallimento totale</span>
+                </div>
+              </button>
+              <button
+                onClick={() => handlePartialStep(false)}
+                className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98]"
+              >
+                <div className="flex flex-col items-center">
+                  <span className="flex items-center gap-2 text-red-500"><TrendingDown size={18} /> PARZIALE</span>
+                  <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">
+                    €{partialBtnAmount.toFixed(2)} (50%)
+                  </span>
+                </div>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => handlePartialStep(true)}
+                className="col-span-1 group relative overflow-hidden py-6 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-xl shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-green-800 active:border-b-0"
+              >
+                <div className="flex flex-col items-center">
+                  <span className="flex items-center gap-3"><Trophy size={24} /> 2° VINTA</span>
+                  <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold">CHIUDI SEQUENZA</span>
+                </div>
+              </button>
+              <button
+                onClick={() => handlePartialStep(false)}
+                className="col-span-1 group relative overflow-hidden py-6 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-xl shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-red-900 active:border-b-0"
+              >
+                <div className="flex flex-col items-center text-white">
+                  <span className="flex items-center gap-3"><XCircle size={24} /> 2° PERSA</span>
+                  <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">PERDE ENTRAMBI</span>
+                </div>
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* EVENTS LIST */}
+        <div className="bg-slate-900/40 rounded-xl border border-slate-700/50 overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-700/50 bg-slate-800/50 flex justify-between items-center">
+            <h3 className="font-bold text-[10px] uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
+              <HistoryIcon size={14} /> Registro EventI ({currentPlan.events.filter((e) => !e.isSystemLog).length})
+            </h3>
+          </div>
+          <div className="p-2 space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+            {[...currentPlan.events].reverse().map((event) => (
+              <div
+                key={event.id}
+                className={`p-3 rounded-xl flex justify-between items-center border transition-all hover:bg-slate-800/50 ${event.isSystemLog
+                  ? 'bg-orange-500/5 border-orange-500/20 text-orange-200'
+                  : event.isVoid
+                    ? 'bg-slate-600/5 border-slate-600/20 text-slate-400'
+                    : event.isWin
+                      ? 'bg-green-500/5 border-green-500/20 shadow-[inset_0_0_10px_rgba(34,197,94,0.05)]'
+                      : 'bg-red-500/5 border-red-500/20 shadow-[inset_0_0_10px_rgba(239,68,68,0.05)]'
+                  }`}
+              >
+                {event.isSystemLog ? (
+                  <div className="w-full flex justify-between items-center px-2">
+                    <span className="font-bold text-xs uppercase tracking-tight flex items-center gap-2">
+                      <LifeBuoy size={14} className="text-orange-400" /> {event.message}
+                    </span>
+                    <span className="text-[10px] tabular-nums opacity-40">
+                      {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs border ${event.isWin ? 'bg-green-500/20 border-green-500/30 text-green-400' : 'bg-red-500/20 border-red-500/30 text-red-400'}`}>
+                        {event.id}
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs uppercase tracking-tight flex items-center gap-2">
+                          {event.isVoid
+                            ? <><AlertTriangle size={12} /> NULLO</>
+                            : event.isWin
+                              ? <><CheckCircle size={12} className="text-green-500" /> Vinto</>
+                              : <><XCircle size={12} className="text-red-500" /> Perso</>}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
+                          {event.isPartialSequence && (
+                            <span className="flex items-center gap-1 bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase">
+                              Sequenza
+                            </span>
+                          )}
+                          <span className="font-medium">Quota: {event.quota}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-medium text-sm text-slate-200 tracking-tight">€{event.capitalAfter.toFixed(2)}</div>
+                      <div className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Residuo</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="w-full max-w-7xl mx-auto p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white min-h-screen">
+      <div className="mb-2">
+        <svg width="410" height="80" viewBox="0 0 600 120" fill="none" xmlns="http://www.w3.org/2000/svg" className="drop-shadow-2xl">
+          <g transform="translate(10, 15)">
+            <path d="M30 0 L80 0 L105 43 L80 86 L30 86 L5 43 Z" stroke="#00D4FF" stroke-width="3" fill="none" />
+            <path d="M30 20 L80 66 M80 20 L30 66" stroke="#00D4FF" stroke-width="5" stroke-linecap="round">
+              <animate attributeName="opacity" values="0.8;1;0.8" dur="3s" repeatCount="indefinite" />
+            </path>
+          </g>
+
+          <text x="130" y="75" fill="#FFFFFF" font-family="Arial Black, sans-serif" font-weight="900" font-size="42" letter-spacing="-1">
+            ABSOLUTE MASA <tspan fill="#00D4FF">X</tspan>
+          </text>
+        </svg>
+      </div>
+
+      {/* TOP STATS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="lg:col-span-2 bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex-1">
+            <div className="text-slate-400 text-[10px] uppercase tracking-widest font-bold mb-1">
+              Capitale Corrente (+ Accantonato)
+            </div>
+            <div className="text-3xl font-medium text-green-400 flex items-baseline gap-2">
+              €{stats.totalWorth.toFixed(2)}
+              <span className="text-sm text-slate-500 font-medium">
+                / €
+                {currentPlan
+                  ? currentPlan.startCapital.toFixed(2)
+                  : config.initialCapital.toFixed(2)}
+              </span>
+            </div>
+            <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5 uppercase tracking-tighter font-bold">
+              Su Cap. Iniziale: <span className="text-slate-400 font-medium">€{stats.absoluteStartCapital.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="w-px h-12 bg-slate-700 hidden md:block"></div>
+
+          <div className="flex-1 md:text-right">
+            <div className="text-slate-400 text-[10px] uppercase tracking-widest font-bold mb-1">
+              Profitto Totale (+Accantonato)
+            </div>
+            <div
+              className={`text-3xl font-medium ${stats.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'
+                }`}
             >
-              {stats.totalGrowth >= 0 ? '+' : ''}
-              {stats.totalGrowth.toFixed(2)}%
-            </span>
+              {stats.totalProfit >= 0 ? '+' : ''}€{stats.totalProfit.toFixed(2)}
+            </div>
+            <div className={`text-xs mt-1 flex md:justify-end items-center font-medium ${stats.totalGrowth >= 0 ? 'text-green-400/80' : 'text-red-400/80'}`}>
+              {stats.totalGrowth >= 0 ? '+' : ''}{stats.totalGrowth.toFixed(2)}%
+            </div>
           </div>
         </div>
 
@@ -748,7 +1294,7 @@ const MasanielloCompound = () => {
                 <PiggyBank size={14} className="text-yellow-500" /> Capitale
                 Accantonato
               </div>
-              <div className="text-2xl font-bold text-yellow-400">
+              <div className="text-2xl font-medium text-yellow-400">
                 €{stats.totalBanked.toFixed(2)}
               </div>
             </div>
@@ -762,741 +1308,794 @@ const MasanielloCompound = () => {
                 <XCircle size={14} className="text-red-500" />
                 <span>{stats.totalLosses} Perse</span>
               </div>
+              <div className="flex items-center gap-1 text-xs text-slate-300">
+                <Hash size={14} className="text-blue-400" />
+                <span>{stats.totalWins + stats.totalLosses} Totali</span>
+              </div>
+              <div className="flex items-center gap-1 text-xs text-slate-300">
+                <Calendar size={14} className="text-slate-400" />
+                <span>{stats.estimatedDays} Giorni</span>
+              </div>
             </div>
           </div>
           <Coins className="absolute top-2 right-2 text-yellow-500/10 w-16 h-16 pointer-events-none" />
         </div>
       </div>
 
-      {/* HISTORY CHART */}
-      {history.length > 0 && (
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 mb-6 shadow-lg h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={getChartData()}>
-              <defs>
-                <linearGradient id="colorCapital" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#4ade80" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#4ade80" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis
-                dataKey="days"
-                stroke="#94a3b8"
-                fontSize={12}
-                tickLine={false}
-                tickFormatter={(value) => `${value}g`}
-              />
-              <YAxis stroke="#94a3b8" fontSize={12} domain={['auto', 'auto']} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area
-                type="monotone"
-                dataKey="capital"
-                stroke="#4ade80"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorCapital)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* RULES */}
-      <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-700 p-4 rounded-lg mb-6">
-        <h3 className="text-sm font-bold text-purple-300 mb-3 flex items-center gap-2">
-          <CheckCircle size={16} /> Regole Automatiche
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {RULES.map((rule) => {
-            const status = getRuleStatus(rule.id);
-            return (
-              <div
-                key={rule.id}
-                onClick={() => toggleRule(rule.id)}
-                className={`px-3 py-3 rounded text-sm flex items-center gap-3 cursor-pointer border select-none ${
-                  status.enabled
-                    ? status.active
-                      ? 'bg-yellow-600/50 border-yellow-500 text-white'
-                      : 'bg-slate-700/80 border-slate-600 text-slate-200'
-                    : 'bg-slate-800/50 border-slate-700 text-slate-500'
-                }`}
-              >
-                {status.enabled ? (
-                  status.active ? (
-                    <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse" />
-                  ) : (
-                    <CheckSquare size={16} className="text-green-400" />
-                  )
-                ) : (
-                  <Square size={16} />
-                )}
-                <span
-                  className={
-                    !status.enabled ? 'line-through decoration-slate-600' : ''
-                  }
-                >
-                  {rule.label}
-                </span>
+      {/* MAIN CONTENT GRID: Piano Attivo on left for large screens */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* LEFT COLUMN: Charts and other content */}
+        <div className="space-y-6">
+          {/* ANALYTICS ROW: CHART & HEATMAP */}
+          <div className="grid grid-cols-1 gap-6">
+            {/* HISTORY CHART */}
+            <div className={`bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg h-[300px] flex flex-col ${history.length === 0 ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+              <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
+                <TrendingUp size={16} className="text-green-400" /> Storico Capitale
+              </h3>
+              <div className="flex-1 min-h-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={getChartData()}>
+                    <defs>
+                      <linearGradient id="colorCapital" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#4ade80" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#4ade80" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis
+                      dataKey="days"
+                      stroke="#94a3b8"
+                      fontSize={10}
+                      tickLine={false}
+                      tickFormatter={(value) => `${value}g`}
+                    />
+                    <YAxis stroke="#94a3b8" fontSize={10} domain={['auto', 'auto']} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area
+                      type="monotone"
+                      dataKey="capital"
+                      stroke="#4ade80"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorCapital)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </div>
 
-      {/* ACTION BUTTONS (CONFIG) */}
-      <div className="flex gap-3 mb-6 flex-wrap">
-        <button
-          onClick={() => setShowConfig(!showConfig)}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg"
-        >
-          <Settings size={18} /> Config
-        </button>
-        {currentPlan && (
-          <>
+            {/* WEEKLY HEATMAP */}
+            <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg overflow-hidden flex flex-col h-[300px]">
+              <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
+                <Target size={16} className="text-green-400" /> Target Weekly €{getWeeklyTarget().toFixed(2)} ({config.weeklyTargetPercentage}%)
+              </h3>
+
+              <div className="flex gap-4 flex-1 min-h-0 items-center">
+                {/* Y-Axis Labels */}
+                <div className="flex flex-col justify-between h-[150px] text-[10px] text-slate-500 py-1">
+                  <span>100%</span>
+                  <span>80%</span>
+                  <span>60%</span>
+                  <span>40%</span>
+                  <span>20%</span>
+                </div>
+
+                {/* Grid */}
+                <div className="flex-1 h-[150px]">
+                  <div className="grid grid-cols-12 gap-1 h-full">
+                    {getWeeklyHeatmapData().map((week, i) => (
+                      <div key={i} className="flex flex-col justify-between h-full group">
+                        <div className="flex flex-col h-full gap-0.5">
+                          {week.data.map((level, levelIdx) => (
+                            <div
+                              key={levelIdx}
+                              className={`flex-1 rounded-sm transition-all duration-500 ${level.data === 1
+                                ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.3)]'
+                                : 'bg-white/5'
+                                }`}
+                              title={`${week.key} - ${level.key}`}
+                            />
+                          ))}
+                        </div>
+                        <div className="text-[10px] text-slate-500 text-center mt-1 group-hover:text-slate-300 transition-colors">
+                          S{i + 1}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {/* ACTION BUTTONS (CONFIG) */}
+          <div className="flex gap-3 mt-6 flex-wrap">
             <button
-              onClick={closeCurrentCycle}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
+              onClick={() => setShowConfig(!showConfig)}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg"
             >
-              <CheckCircle size={18} /> Chiudi Ciclo
+              <Settings size={18} /> Config
             </button>
-            <button
-              onClick={resetCurrentPlan}
-              className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg"
-            >
-              <RotateCcw size={18} /> Reset Ciclo
-            </button>
-          </>
-        )}
-        <button
-          onClick={resetAllCycles}
-          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg ml-auto"
-        >
-          <Trash2 size={18} /> Reset Tutto
-        </button>
-      </div>
-
-      {/* CONFIG PANEL CON ANTEPRIMA */}
-      {showConfig && (
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 mb-6 animate-in fade-in">
-          <h2 className="text-xl font-bold mb-4">Configurazione</h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Capitale Iniziale
-              </label>
-              <input
-                type="number"
-                value={config.initialCapital}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    initialCapital: parseFloat(e.target.value),
-                  })
-                }
-                className="w-full bg-slate-700 border border-slate-600 rounded p-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Quota</label>
-              <input
-                type="number"
-                step="0.1"
-                value={config.quota}
-                onChange={(e) =>
-                  setConfig({ ...config, quota: parseFloat(e.target.value) })
-                }
-                className="w-full bg-slate-700 border border-slate-600 rounded p-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Eventi Totali
-              </label>
-              <input
-                type="number"
-                value={config.totalEvents}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    totalEvents: parseInt(e.target.value),
-                  })
-                }
-                className="w-full bg-slate-700 border border-slate-600 rounded p-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Vittorie Attese
-              </label>
-              <input
-                type="number"
-                value={config.expectedWins}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    expectedWins: parseInt(e.target.value),
-                  })
-                }
-                className="w-full bg-slate-700 border border-slate-600 rounded p-2"
-              />
-            </div>
-            {/* INPUT ACCANTONAMENTO */}
-            <div className="col-span-2 bg-indigo-900/20 p-3 rounded border border-indigo-500/20">
-              <label className="block text-sm text-indigo-300 mb-2 font-bold flex items-center gap-2">
-                <PiggyBank size={16} /> Percentuale Accantonamento (fine ciclo)
-              </label>
-              <div className="flex items-center gap-4">
-                <input
-                  type="range"
-                  min="0"
-                  max="50"
-                  step="5"
-                  value={config.accumulationPercent}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      accumulationPercent: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                />
-                <span className="font-bold w-16 text-right text-indigo-400">
-                  {config.accumulationPercent}%
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Percentuale calcolata sul capitale finale. <br />
-                <span className="text-yellow-500">
-                  Nota: L'accantonamento è limitato al solo utile netto. Il
-                  nuovo ciclo non partirà mai con un importo inferiore al
-                  capitale di partenza del ciclo precedente.
-                </span>
-              </p>
-            </div>
-          </div>
-
-          {/* BOX ANTEPRIMA RENDIMENTO */}
-          <div className="mt-6 p-4 bg-indigo-900/30 border border-indigo-500/30 rounded-lg">
-            <h3 className="text-sm font-bold text-indigo-300 mb-3 flex items-center gap-2">
-              <Calculator size={16} /> Anteprima Rendimento (Singolo Ciclo)
-            </h3>
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div>
-                <div className="text-xs text-slate-400">Capitale Target</div>
-                <div className="font-bold text-green-400">
-                  €
-                  {isNaN(previewTarget)
-                    ? '---'
-                    : roundTwo(previewTarget).toFixed(2)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-400">Utile Netto</div>
-                <div className="font-bold text-green-400">
-                  €
-                  {isNaN(previewProfit)
-                    ? '---'
-                    : roundTwo(previewProfit).toFixed(2)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-400">Rendimento %</div>
-                <div className="font-bold text-indigo-400">
-                  {isNaN(previewROI) ? '---' : roundTwo(previewROI).toFixed(2)}%
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={startNewPlan}
-            className="mt-4 w-full bg-green-600 hover:bg-green-700 py-3 rounded font-bold"
-          >
-            Avvia Piano
-          </button>
-        </div>
-      )}
-
-      {/* ACTIVE PLAN */}
-      {currentPlan && progressStats && (
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 mb-6 shadow-xl">
-          {/* RESCUE MODE BANNER - appare solo se critico */}
-          {progressStats.isCritical && !currentPlan.isRescued && (
-            <div className="relative mb-6 -mx-6 -mt-6 bg-red-600 text-white p-4 rounded-t-lg shadow-md animate-in slide-in-from-top-2">
-              <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
-                <div>
-                  <div className="flex items-center gap-2 font-bold text-lg">
-                    <AlertTriangle size={24} className="text-yellow-300" />
-                    SOGLIA CRITICA (80% Perdite)
-                  </div>
-                  <div className="text-sm text-red-100 opacity-90 mt-1">
-                    Rischio fallimento elevato. Attiva il salvagente per ridurre
-                    la varianza.
-                  </div>
-                </div>
-
-                <div className="bg-red-800/50 p-3 rounded border border-red-500/50 flex flex-col gap-2 min-w-[300px]">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="opacity-70">Target Attuale:</span>
-                    <span className="font-bold">
-                      €{currentPlan.targetCapital.toFixed(2)}
-                    </span>
-                  </div>
-                  {rescueProjection && (
-                    <div className="flex justify-between items-center text-sm text-yellow-300">
-                      <span className="flex items-center gap-1">
-                        <ArrowDownRight size={14} /> Nuovo Target:
-                      </span>
-                      <span className="font-bold text-lg">
-                        €{rescueProjection.target.toFixed(2)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="h-px bg-red-500/50 my-1"></div>
-                  <div className="flex gap-2 items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold uppercase">
-                        Aggiungi:
-                      </span>
-                      <select
-                        value={rescueEventsToAdd}
-                        onChange={(e) => setRescueEventsToAdd(e.target.value)}
-                        className="bg-white text-red-700 border-0 rounded px-2 py-1 text-sm font-bold outline-none cursor-pointer"
-                      >
-                        <option value="1">+1 Evento</option>
-                        <option value="2">+2 Eventi</option>
-                        <option value="3">+3 Eventi</option>
-                        <option value="4">+4 Eventi</option>
-                        <option value="5">+5 Eventi</option>
-                      </select>
-                    </div>
-                    <button
-                      onClick={activateRescueMode}
-                      className="bg-yellow-400 hover:bg-yellow-300 text-red-900 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 shadow transition-colors"
-                    >
-                      <LifeBuoy size={16} /> ATTIVA
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {currentPlan.isRescued && (
-            <div className="absolute top-4 right-4 bg-orange-600/20 border border-orange-500 text-orange-200 px-3 py-1 rounded text-xs font-bold flex items-center gap-2">
-              <LifeBuoy size={14} /> SALVAGENTE ATTIVO
-            </div>
-          )}
-
-          <div className="flex justify-between items-center mb-4 mt-2">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              Piano Attivo
-              {currentPlan.isRescued && (
-                <span className="text-xs text-orange-400 border border-orange-500 rounded px-1">
-                  MODIFICATO
-                </span>
-              )}
-            </h2>
-            <div className="text-sm px-3 py-1 bg-blue-900/50 rounded border border-blue-800">
-              {currentPlan.remainingEvents}E / {currentPlan.remainingWins}V
-              {currentPlan.wasNegative &&
-                currentPlan.currentCapital <
-                  currentPlan.startCapital - 0.01 && (
-                  <span className="ml-2 text-red-300 bg-red-900/50 px-2 rounded text-xs">
-                    In negativo
-                  </span>
-                )}
-            </div>
-          </div>
-
-          {/* DASHBOARD */}
-          <div
-            className={`grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 bg-slate-900/50 p-4 rounded-lg border ${
-              progressStats.isCritical
-                ? 'border-red-500/50'
-                : 'border-slate-700'
-            }`}
-          >
-            <div>
-              <div className="text-slate-400 text-xs">Quota / Cap.</div>
-              <div className="font-bold text-lg">
-                @{currentPlan.quota} | €{currentPlan.startCapital}
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Eventi</span>
-                <span>
-                  {progressStats.eventsPlayed} / {currentPlan.totalEvents}
-                </span>
-              </div>
-              <div className="h-1.5 w-full bg-slate-700 rounded-full mt-1">
-                <div
-                  className="h-full bg-blue-500"
-                  style={{
-                    width: `${
-                      (progressStats.eventsPlayed / currentPlan.totalEvents) *
-                      100
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Vittorie</span>
-                <span className="text-green-400">
-                  {progressStats.structuralWins} / {currentPlan.expectedWins}
-                </span>
-              </div>
-              <div className="h-1.5 w-full bg-slate-700 rounded-full mt-1">
-                <div
-                  className="h-full bg-green-500"
-                  style={{
-                    width: `${
-                      (progressStats.structuralWins /
-                        currentPlan.expectedWins) *
-                      100
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Errori</span>
-                <span
-                  className={
-                    progressStats.isCritical
-                      ? 'text-red-500 font-bold animate-pulse'
-                      : 'text-red-400'
-                  }
-                >
-                  {progressStats.structuralLosses} /{' '}
-                  {progressStats.totalAllowedErrors}
-                </span>
-              </div>
-              <div className="h-1.5 w-full bg-slate-700 rounded-full mt-1">
-                <div
-                  className={`h-full ${
-                    progressStats.isCritical ? 'bg-red-600' : 'bg-red-500'
-                  }`}
-                  style={{
-                    width: `${
-                      (progressStats.structuralLosses /
-                        progressStats.totalAllowedErrors) *
-                      100
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* BETTING BOX */}
-          <div
-            className={`p-6 rounded-lg mb-4 shadow-lg relative overflow-hidden transition-colors duration-300 ${
-              isSequenceActive
-                ? 'bg-gradient-to-r from-indigo-900 to-slate-800 border border-indigo-500/50'
-                : 'bg-gradient-to-r from-blue-600 to-blue-700'
-            }`}
-          >
-            <div className="relative z-10">
-              <div className="text-sm text-blue-100/80 mb-1 font-medium tracking-wider flex justify-between items-center">
-                <span>
-                  {isSequenceActive
-                    ? `SEQUENZA PARZIALE (STEP ${sequence.length + 1}/2)`
-                    : 'PROSSIMA PUNTATA (100%)'}
-                </span>
-              </div>
-              <div className="text-4xl font-bold tracking-tight text-white">
-                €
-                {isSequenceActive
-                  ? sequence[0].stake.toFixed(2)
-                  : targetStake.toFixed(2)}
-                {isSequenceActive && (
-                  <span className="text-lg text-indigo-300 ml-2 font-normal">
-                    / quota 50%
-                  </span>
-                )}
-              </div>
-
-              {/* Sequence Visualizer */}
-              {isSequenceActive && (
-                <div className="flex gap-2 mt-4">
-                  {sequence.map((step, idx) => (
-                    <span
-                      key={idx}
-                      className={`px-3 py-1 rounded text-xs font-bold border ${
-                        step.isWin
-                          ? 'bg-green-500/20 border-green-500 text-green-300'
-                          : 'bg-red-500/20 border-red-500 text-red-300'
-                      }`}
-                    >
-                      {idx + 1}°: {step.isWin ? 'VINTO' : 'PERSO'}
-                    </span>
-                  ))}
-                  <span className="px-3 py-1 rounded text-xs font-bold border border-white/30 text-white/50 animate-pulse">
-                    2°: In attesa...
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* CONTROLS */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            {!isSequenceActive ? (
-              // MODE STANDARD: VINTA 50% / PERSA 50%
+            {currentPlan && (
               <>
                 <button
-                  onClick={() => handleFullBet(true)}
-                  className="py-4 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-lg shadow-lg"
+                  onClick={closeCurrentCycle}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
                 >
-                  VINTA (100%)
+                  <CheckCircle size={18} /> Chiudi Ciclo
                 </button>
                 <button
-                  onClick={() => handlePartialStep(true)}
-                  className="py-4 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-lg shadow-lg flex flex-col items-center justify-center leading-tight text-white"
+                  onClick={resetCurrentPlan}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg"
                 >
-                  <span>VINTA 50%</span>
-                  <span className="text-xs font-normal opacity-90 mt-1">
-                    Importo: €{partialBtnAmount.toFixed(2)}
-                  </span>
-                </button>
-                <button
-                  onClick={() => handleFullBet(false)}
-                  className="py-4 bg-red-600 hover:bg-red-700 rounded-lg font-bold text-lg shadow-lg col-span-1"
-                >
-                  PERSA (100%)
-                </button>
-                <button
-                  onClick={() => handlePartialStep(false)}
-                  className="py-4 bg-red-500 hover:bg-red-600 rounded-lg font-bold text-lg shadow-lg flex flex-col items-center justify-center leading-tight text-white"
-                >
-                  <span>PERSA 50%</span>
-                  <span className="text-xs font-normal opacity-90 mt-1">
-                    Importo: €{partialBtnAmount.toFixed(2)}
-                  </span>
-                </button>
-              </>
-            ) : (
-              // MODE SEQUENZA ATTIVA
-              <>
-                <button
-                  onClick={() => handlePartialStep(true)}
-                  className="py-6 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-xl shadow-lg flex flex-col items-center justify-center text-white"
-                >
-                  <span>2° VINTA</span>
-                  <span className="text-xs opacity-90 font-normal mt-1">
-                    Importo: €{partialBtnAmount.toFixed(2)}
-                  </span>
-                </button>
-                <button
-                  onClick={() => handlePartialStep(false)}
-                  className="py-6 bg-red-500 hover:bg-red-600 rounded-lg font-bold text-xl shadow-lg flex flex-col items-center justify-center text-white"
-                >
-                  <span>2° PERSA</span>
-                  <span className="text-xs opacity-90 font-normal mt-1">
-                    Importo: €{partialBtnAmount.toFixed(2)}
-                  </span>
+                  <RotateCcw size={18} /> Reset Ciclo
                 </button>
               </>
             )}
           </div>
+        </div>
 
-          {/* EVENTS LIST */}
-          <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-700">
-            <h3 className="font-bold mb-3 text-sm text-slate-300">
-              Eventi ({currentPlan.events.filter((e) => !e.isSystemLog).length})
-            </h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-              {[...currentPlan.events].reverse().map((event) => (
-                <div
-                  key={event.id}
-                  className={`p-3 rounded flex justify-between items-center ${
-                    event.isSystemLog
-                      ? 'bg-orange-900/40 border border-orange-500/50 text-orange-200'
-                      : event.isVoid
-                      ? 'bg-slate-600/30 border-l-4 border-slate-500 text-slate-300'
-                      : event.isWin
-                      ? 'bg-green-900/20 border-l-4 border-green-500'
-                      : 'bg-red-900/20 border-l-4 border-red-500'
-                  }`}
-                >
-                  {event.isSystemLog ? (
-                    <div className="w-full flex justify-between items-center">
-                      <span className="font-bold text-sm flex items-center gap-2">
-                        <LifeBuoy size={16} /> {event.message}
-                      </span>
-                      <span className="text-xs">
-                        {new Date(event.timestamp).toLocaleTimeString()}
+        {/* RIGHT COLUMN: Piano Attivo (sidebar on large screens, hidden on mobile) */}
+        <div className="hidden lg:block lg:sticky lg:top-6 lg:self-start">
+          {renderPianoAttivo()}
+        </div>
+      </div>
+
+
+      {/* CONFIG PANEL CON ANTEPRIMA */}
+      {
+        showConfig && (
+          <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 mb-6 animate-in fade-in">
+            <h2 className="text-xl font-bold mb-4">Configurazione</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Capitale Iniziale
+                </label>
+                <input
+                  type="number"
+                  value={config.initialCapital}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      initialCapital: parseFloat(e.target.value),
+                    })
+                  }
+                  className="w-full bg-slate-700 border border-slate-600 rounded p-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Quota</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={config.quota}
+                  onChange={(e) =>
+                    setConfig({ ...config, quota: parseFloat(e.target.value) })
+                  }
+                  className="w-full bg-slate-700 border border-slate-600 rounded p-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Eventi Totali
+                </label>
+                <input
+                  type="number"
+                  value={config.totalEvents}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      totalEvents: parseInt(e.target.value),
+                    })
+                  }
+                  className="w-full bg-slate-700 border border-slate-600 rounded p-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Vittorie Attese
+                </label>
+                <input
+                  type="number"
+                  value={config.expectedWins}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      expectedWins: parseInt(e.target.value),
+                    })
+                  }
+                  className="w-full bg-slate-700 border border-slate-600 rounded p-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Target Capitale Settimanale (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={config.weeklyTargetPercentage}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      weeklyTargetPercentage: parseFloat(e.target.value) || 0,
+                    })
+                  }
+                  className="w-full bg-slate-700 border border-slate-600 rounded p-2"
+                />
+                <div className="text-xs text-slate-400 mt-1">
+                  = €{((config.weeklyTargetPercentage / 100) * config.initialCapital).toFixed(2)} sul capitale iniziale
+                </div>
+              </div>
+              {/* INPUT ACCANTONAMENTO */}
+              <div className="col-span-2 bg-indigo-900/20 p-3 rounded border border-indigo-500/20">
+                <label className="block text-sm text-indigo-300 mb-2 font-bold flex items-center gap-2">
+                  <PiggyBank size={16} /> Percentuale Accantonamento (fine ciclo)
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    step="5"
+                    value={config.accumulationPercent}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        accumulationPercent: parseInt(e.target.value),
+                      })
+                    }
+                    className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
+                  />
+                  <span className="font-bold w-16 text-right text-indigo-400">
+                    {config.accumulationPercent}%
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Percentuale calcolata sul capitale finale. <br />
+                  <span className="text-yellow-500">
+                    Nota: L'accantonamento è limitato al solo utile netto. Il
+                    nuovo ciclo non partirà mai con un importo inferiore al
+                    capitale di partenza del ciclo precedente.
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* BOX ANTEPRIMA RENDIMENTO */}
+            <div className="mt-6 p-4 bg-indigo-900/30 border border-indigo-500/30 rounded-lg">
+              <h3 className="text-sm font-bold text-indigo-300 mb-3 flex items-center gap-2">
+                <Calculator size={16} /> Anteprima Rendimento (Singolo Ciclo)
+              </h3>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <div className="text-xs text-slate-400">Capitale Target</div>
+                  <div className="font-bold text-green-400">
+                    €
+                    {isNaN(previewTarget)
+                      ? '---'
+                      : roundTwo(previewTarget).toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">Utile Netto</div>
+                  <div className="font-bold text-green-400">
+                    €
+                    {isNaN(previewProfit)
+                      ? '---'
+                      : roundTwo(previewProfit).toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400">Rendimento %</div>
+                  <div className="font-bold text-indigo-400">
+                    {isNaN(previewROI) ? '---' : roundTwo(previewROI).toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={startNewPlan}
+              className="mt-4 w-full bg-green-600 hover:bg-green-700 py-3 rounded font-bold"
+            >
+              Avvia Piano
+            </button>
+          </div>
+        )
+      }
+
+
+
+
+      {/* PIANO ATTIVO - Mobile only (hidden on large screens where it's in sidebar) */}
+      <div className="block lg:hidden">
+        {renderPianoAttivo()}
+      </div>
+
+      {/* OLD ACTIVE PLAN - TO BE REMOVED */}
+      {
+        false && currentPlan && progressStats && (
+          <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 mb-6 shadow-xl">
+            {/* RESCUE MODE BANNER - appare solo se critico */}
+            {progressStats.isCritical && !currentPlan.isRescued && (
+              <div className="relative mb-6 -mx-6 -mt-6 bg-red-600 text-white p-4 rounded-t-lg shadow-md animate-in slide-in-from-top-2">
+                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 font-bold text-lg">
+                      <AlertTriangle size={24} className="text-yellow-300" />
+                      SOGLIA CRITICA (80% Perdite)
+                    </div>
+                    <div className="text-sm text-red-100 opacity-90 mt-1">
+                      Rischio fallimento elevato. Attiva il salvagente per ridurre
+                      la varianza.
+                    </div>
+                  </div>
+
+                  <div className="bg-red-800/50 p-3 rounded border border-red-500/50 flex flex-col gap-2 min-w-[300px]">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="opacity-70">Target Attuale:</span>
+                      <span className="font-bold">
+                        €{currentPlan.targetCapital.toFixed(2)}
                       </span>
                     </div>
-                  ) : (
-                    <>
-                      <div>
-                        <div className="font-bold text-sm flex items-center gap-2">
-                          #{event.id} -{' '}
-                          {event.isVoid
-                            ? 'NULLO (VOID)'
-                            : event.isWin
-                            ? 'VINTO'
-                            : 'PERSO'}
+                    {rescueProjection && (
+                      <div className="flex justify-between items-center text-sm text-yellow-300">
+                        <span className="flex items-center gap-1">
+                          <ArrowDownRight size={14} /> Nuovo Target:
+                        </span>
+                        <span className="font-bold text-lg">
+                          €{rescueProjection.target.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="h-px bg-red-500/50 my-1"></div>
+                    <div className="flex gap-2 items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase">
+                          Aggiungi:
+                        </span>
+                        <select
+                          value={rescueEventsToAdd}
+                          onChange={(e) => setRescueEventsToAdd(Number(e.target.value))}
+                          className="bg-white text-red-700 border-0 rounded px-2 py-1 text-sm font-bold outline-none cursor-pointer"
+                        >
+                          <option value="1">+1 Evento</option>
+                          <option value="2">+2 Eventi</option>
+                          <option value="3">+3 Eventi</option>
+                          <option value="4">+4 Eventi</option>
+                          <option value="5">+5 Eventi</option>
+                        </select>
+                      </div>
+                      <button
+                        onClick={activateRescueMode}
+                        className="bg-yellow-400 hover:bg-yellow-300 text-red-900 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 shadow transition-colors"
+                      >
+                        <LifeBuoy size={16} /> ATTIVA
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentPlan.isRescued && (
+              <div className="absolute top-4 right-4 bg-orange-600/20 border border-orange-500 text-orange-200 px-3 py-1 rounded text-xs font-bold flex items-center gap-2">
+                <LifeBuoy size={14} /> SALVAGENTE ATTIVO
+              </div>
+            )}
+
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                PIANO ATTIVO
+                {currentPlan.isRescued && (
+                  <span className="text-xs text-orange-400 border border-orange-500 rounded px-1">
+                    MODIFICATO
+                  </span>
+                )}
+              </h2>
+              <div className="flex items-center gap-2">
+                <div className="text-sm px-3 py-1.5 bg-blue-900/50 rounded border border-blue-800 font-medium">
+                  {currentPlan.totalEvents}E / {currentPlan.expectedWins}V
+                </div>
+                <button
+                  onClick={() => setShowConfig(true)}
+                  className="px-3 py-1.5 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded text-sm flex items-center gap-2 transition-colors"
+                >
+                  <Settings size={14} /> Opzioni
+                </button>
+              </div>
+            </div>
+
+            {/* STATS CARDS */}
+            <div className="grid grid-cols-4 gap-3 mb-6">
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
+                <div className="text-3xl font-medium text-white mb-1">€{currentPlan.currentCapital.toFixed(0)}</div>
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Capitale</div>
+              </div>
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
+                <div className="text-3xl font-medium text-blue-400 mb-1">
+                  {progressStats.eventsPlayed}/{currentPlan.totalEvents}
+                </div>
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Eventi</div>
+              </div>
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
+                <div className="text-3xl font-medium text-green-400 mb-1">
+                  {progressStats.structuralWins}/{currentPlan.expectedWins}
+                </div>
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Vittorie</div>
+              </div>
+              <div className={`bg-slate-800/50 border rounded-lg p-4 text-center ${progressStats.isCritical ? 'border-red-500/50' : 'border-slate-700'
+                }`}>
+                <div className={`text-3xl font-bold mb-1 ${progressStats.isCritical ? 'text-red-500 animate-pulse' : 'text-red-400'
+                  }`}>
+                  {progressStats.structuralLosses}/{progressStats.totalAllowedErrors}
+                </div>
+                <div className="text-xs text-slate-400 uppercase tracking-wider">Errori</div>
+              </div>
+            </div>
+
+            {/* BETTING BOX */}
+            <div
+              className={`p-6 rounded-lg mb-4 shadow-lg relative overflow-hidden transition-colors duration-300 ${isSequenceActive
+                ? 'bg-gradient-to-r from-indigo-900 to-slate-800 border border-indigo-500/50'
+                : 'bg-gradient-to-r from-blue-600 to-blue-700'
+                }`}
+            >
+              <div className="relative z-10">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-lg text-blue-50 font-black tracking-wider flex items-center gap-3">
+                    <RefreshCw size={18} className={isSequenceActive ? 'animate-spin-slow' : ''} />
+                    <span>
+                      {isSequenceActive
+                        ? `SEQUENZA (STEP ${sequence.length + 1}/2)`
+                        : 'PROSSIMA PUNTATA'}
+                    </span>
+                  </div>
+                  <div className="text-3xl font-black tracking-tight text-white flex items-baseline gap-1">
+                    <span className="text-lg font-medium opacity-50">€</span>
+                    {isSequenceActive
+                      ? sequence[0].stake.toFixed(2)
+                      : targetStake.toFixed(2)}
+                    {isSequenceActive && (
+                      <span className="text-xs text-indigo-300 ml-2 font-bold px-2 py-0.5 bg-black/20 rounded-full">
+                        quota 50%
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sequence Visualizer */}
+                {isSequenceActive && (
+                  <div className="flex gap-2 mt-4 pt-3 border-t border-white/10">
+                    {sequence.map((step, idx) => (
+                      <span
+                        key={idx}
+                        className={`px-3 py-1 rounded text-xs font-bold border ${step.isWin
+                          ? 'bg-green-500/20 border-green-500 text-green-300'
+                          : 'bg-red-500/20 border-red-500 text-red-300'
+                          }`}
+                      >
+                        {idx + 1}°: {step.isWin ? 'VINTO' : 'PERSO'}
+                      </span>
+                    ))}
+                    <span className="px-3 py-1 rounded text-xs font-bold border border-white/30 text-white/50 animate-pulse">
+                      2°: In attesa...
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* COLLAPSIBLE RULES */}
+            <div className="mb-6">
+              <button
+                onClick={() => setRulesExpanded(!rulesExpanded)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-slate-800/30 hover:bg-slate-800/50 border border-slate-700/50 rounded-lg transition-colors text-left"
+              >
+                <div className="flex items-center gap-2 text-sm">
+                  <CheckCircle size={16} className="text-green-500/70" />
+                  <span className="font-medium text-slate-300">
+                    Regole Automatiche Attive: {activeRules.length}
+                  </span>
+                </div>
+                <ChevronDown
+                  size={18}
+                  className={`text-slate-400 transition-transform ${rulesExpanded ? 'rotate-180' : ''
+                    }`}
+                />
+              </button>
+              {rulesExpanded && (
+                <div className="mt-2 p-4 bg-slate-900/40 border border-slate-700/30 rounded-lg">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {RULES.map((rule) => {
+                      const status = getRuleStatus(rule.id);
+                      return (
+                        <div
+                          key={rule.id}
+                          onClick={() => toggleRule(rule.id)}
+                          className={`px-3 py-2 rounded text-xs flex items-center gap-3 cursor-pointer border select-none transition-colors ${status.enabled
+                            ? 'bg-slate-700/40 border-slate-600/50 text-slate-300 hover:bg-slate-700/60'
+                            : 'bg-slate-800/20 border-slate-800 text-slate-500 opacity-40 hover:opacity-60'
+                            }`}
+                        >
+                          {status.enabled ? (
+                            <CheckSquare size={13} className="text-green-500/70" />
+                          ) : (
+                            <Square size={13} />
+                          )}
+                          <span
+                            className={
+                              !status.enabled ? 'line-through decoration-slate-700' : ''
+                            }
+                          >
+                            {rule.label}
+                          </span>
                         </div>
-                        <div className="text-xs text-slate-400 mt-1 flex gap-2">
-                          {event.isPartialSequence &&
-                            event.sequenceDetails &&
-                            event.sequenceDetails.map((part, i) => (
-                              <span
-                                key={i}
-                                className={`px-1.5 rounded text-[10px] border ${
-                                  part.isWin
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* CONTROLS */}
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              {!isSequenceActive ? (
+                // MODE STANDARD: VINTA 50% / PERSA 50%
+                <>
+                  <button
+                    onClick={() => handleFullBet(true)}
+                    className="py-5 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-[1.02]"
+                  >
+                    VINTA (100%)
+                  </button>
+                  <button
+                    onClick={() => handlePartialStep(true)}
+                    className="py-5 bg-green-500/80 hover:bg-green-500 border-2 border-green-400/50 rounded-lg font-bold text-lg shadow-lg flex flex-col items-center justify-center leading-tight text-white transition-all hover:scale-[1.02]"
+                  >
+                    <span>VINTA (50%)</span>
+                    <span className="text-xs font-normal opacity-90 mt-1">
+                      Importo: €{partialBtnAmount.toFixed(2)}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => handleFullBet(false)}
+                    className="py-5 bg-red-600 hover:bg-red-700 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-[1.02]"
+                  >
+                    PERSA (100%)
+                  </button>
+                  <button
+                    onClick={() => handlePartialStep(false)}
+                    className="py-5 bg-red-500/80 hover:bg-red-500 border-2 border-red-400/50 rounded-lg font-bold text-lg shadow-lg flex flex-col items-center justify-center leading-tight text-white transition-all hover:scale-[1.02]"
+                  >
+                    <span>PERSA (50%)</span>
+                    <span className="text-xs font-normal opacity-90 mt-1">
+                      Importo: €{partialBtnAmount.toFixed(2)}
+                    </span>
+                  </button>
+                </>
+              ) : (
+                // MODE SEQUENZA ATTIVA
+                <>
+                  <button
+                    onClick={() => handlePartialStep(true)}
+                    className="py-6 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-xl shadow-lg flex flex-col items-center justify-center text-white transition-all hover:scale-[1.02]"
+                  >
+                    <span>2° VINTA</span>
+                    <span className="text-xs opacity-90 font-normal mt-1">
+                      Importo: €{partialBtnAmount.toFixed(2)}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => handlePartialStep(false)}
+                    className="py-6 bg-red-500 hover:bg-red-600 rounded-lg font-bold text-xl shadow-lg flex flex-col items-center justify-center text-white transition-all hover:scale-[1.02]"
+                  >
+                    <span>2° PERSA</span>
+                    <span className="text-xs opacity-90 font-normal mt-1">
+                      Importo: €{partialBtnAmount.toFixed(2)}
+                    </span>
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* EVENTS LIST */}
+            <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-700">
+              <h3 className="font-bold mb-3 text-sm text-slate-300">
+                Eventi ({currentPlan.events.filter((e) => !e.isSystemLog).length})
+              </h3>
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                {[...currentPlan.events].reverse().map((event) => (
+                  <div
+                    key={event.id}
+                    className={`p-3 rounded flex justify-between items-center ${event.isSystemLog
+                      ? 'bg-orange-900/40 border border-orange-500/50 text-orange-200'
+                      : event.isVoid
+                        ? 'bg-slate-600/30 border-l-4 border-slate-500 text-slate-300'
+                        : event.isWin
+                          ? 'bg-green-900/20 border-l-4 border-green-500'
+                          : 'bg-red-900/20 border-l-4 border-red-500'
+                      }`}
+                  >
+                    {event.isSystemLog ? (
+                      <div className="w-full flex justify-between items-center">
+                        <span className="font-bold text-sm flex items-center gap-2">
+                          <LifeBuoy size={16} /> {event.message}
+                        </span>
+                        <span className="text-xs">
+                          {new Date(event.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <div className="font-bold text-sm flex items-center gap-2">
+                            #{event.id} -{' '}
+                            {event.isVoid
+                              ? 'NULLO (VOID)'
+                              : event.isWin
+                                ? 'VINTO'
+                                : 'PERSO'}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-1 flex gap-2">
+                            {event.isPartialSequence &&
+                              event.sequenceDetails &&
+                              event.sequenceDetails.map((part, i) => (
+                                <span
+                                  key={i}
+                                  className={`px-1.5 rounded text-[10px] border ${part.isWin
                                     ? 'border-green-500/50 text-green-300'
                                     : 'border-red-500/50 text-red-300'
-                                }`}
-                              >
-                                {part.isWin ? 'W' : 'L'}
+                                    }`}
+                                >
+                                  {part.isWin ? 'W' : 'L'}
+                                </span>
+                              ))}
+                            {!event.isPartialSequence && (
+                              <span>Puntata: €{event.stake.toFixed(2)}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold">
+                            €{event.capitalAfter.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            {event.isPartial ? (
+                              <span className="text-indigo-300">
+                                In attesa risoluzione...
                               </span>
-                            ))}
-                          {!event.isPartialSequence && (
-                            <span>Puntata: €{event.stake.toFixed(2)}</span>
+                            ) : (
+                              `${event.eventsLeft} rim. / ${event.winsLeft} vitt. rim.`
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* HISTORY */}
+      {
+        history.length > 0 && (
+          <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
+            <h2 className="text-xl font-bold mb-4">Storico ({history.length})</h2>
+            <div className="space-y-3">
+              {[...history].reverse().map((plan) => {
+                const profit = plan.currentCapital - plan.startCapital;
+                const isExpanded = expandedHistory === plan.id;
+                return (
+                  <div
+                    key={plan.id}
+                    className="bg-slate-700 rounded-lg overflow-hidden"
+                  >
+                    <div
+                      onClick={() =>
+                        setExpandedHistory(isExpanded ? null : plan.id)
+                      }
+                      className="p-4 cursor-pointer hover:bg-slate-600/50 flex justify-between items-center"
+                    >
+                      <div>
+                        <div className="font-bold flex items-center gap-2">
+                          Gen. {plan.generationNumber + 1}{' '}
+                          {isExpanded ? (
+                            <ChevronUp size={16} />
+                          ) : (
+                            <ChevronDown size={16} />
+                          )}
+                          {plan.isRescued && (
+                            <LifeBuoy size={14} className="text-orange-400" />
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          {plan.wins}V / {plan.losses}L
+                        </div>
+                        <div className="text-xs text-slate-300 bg-slate-800/50 px-2 py-1 rounded inline-block">
+                          €{plan.startCapital.toFixed(2)} → €
+                          {plan.currentCapital.toFixed(2)}
+                          {plan.accumulatedAmount > 0 && (
+                            <span className="text-yellow-400 ml-2">
+                              (Bank: €{plan.accumulatedAmount})
+                            </span>
                           )}
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-bold">
-                          €{event.capitalAfter.toFixed(2)}
+                        <div
+                          className={`font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'
+                            }`}
+                        >
+                          {profit >= 0 ? '+' : ''}€{profit.toFixed(2)}
                         </div>
                         <div className="text-xs text-slate-400">
-                          {event.isPartial ? (
-                            <span className="text-indigo-300">
-                              In attesa risoluzione...
-                            </span>
-                          ) : (
-                            `${event.eventsLeft} rim. / ${event.winsLeft} vitt. rim.`
-                          )}
+                          {plan.triggeredRule || plan.status}
                         </div>
                       </div>
-                    </>
-                  )}
-                </div>
-              ))}
+                    </div>
+                    {isExpanded && plan.events && (
+                      <div className="px-4 pb-4 border-t border-slate-600 bg-slate-700/50 mt-2 pt-2">
+                        {plan.events
+                          .filter((e) => !e.isSystemLog)
+                          .map((ev) => (
+                            <div
+                              key={ev.id}
+                              className="text-sm flex justify-between py-1 border-b border-slate-600/30 last:border-0"
+                            >
+                              <span
+                                className={
+                                  ev.isVoid
+                                    ? 'text-slate-400'
+                                    : ev.isWin
+                                      ? 'text-green-300'
+                                      : 'text-red-300'
+                                }
+                              >
+                                #{ev.id}{' '}
+                                {ev.isVoid ? 'VOID' : ev.isWin ? 'WIN' : 'LOSS'}
+                              </span>
+                              <span>€{ev.capitalAfter.toFixed(2)}</span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {/* HISTORY */}
-      {history.length > 0 && (
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700">
-          <h2 className="text-xl font-bold mb-4">Storico ({history.length})</h2>
-          <div className="space-y-3">
-            {[...history].reverse().map((plan) => {
-              const profit = plan.currentCapital - plan.startCapital;
-              const isExpanded = expandedHistory === plan.id;
-              return (
-                <div
-                  key={plan.id}
-                  className="bg-slate-700 rounded-lg overflow-hidden"
-                >
-                  <div
-                    onClick={() =>
-                      setExpandedHistory(isExpanded ? null : plan.id)
-                    }
-                    className="p-4 cursor-pointer hover:bg-slate-600/50 flex justify-between items-center"
-                  >
-                    <div>
-                      <div className="font-bold flex items-center gap-2">
-                        Gen. {plan.generationNumber + 1}{' '}
-                        {isExpanded ? (
-                          <ChevronUp size={16} />
-                        ) : (
-                          <ChevronDown size={16} />
-                        )}
-                        {plan.isRescued && (
-                          <LifeBuoy size={14} className="text-orange-400" />
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {plan.wins}V / {plan.losses}L
-                      </div>
-                      <div className="text-xs text-slate-300 bg-slate-800/50 px-2 py-1 rounded inline-block">
-                        €{plan.startCapital.toFixed(2)} → €
-                        {plan.currentCapital.toFixed(2)}
-                        {plan.accumulatedAmount > 0 && (
-                          <span className="text-yellow-400 ml-2">
-                            (Bank: €{plan.accumulatedAmount})
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div
-                        className={`font-bold ${
-                          profit >= 0 ? 'text-green-400' : 'text-red-400'
-                        }`}
-                      >
-                        {profit >= 0 ? '+' : ''}€{profit.toFixed(2)}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {plan.triggeredRule || plan.status}
-                      </div>
-                    </div>
-                  </div>
-                  {isExpanded && plan.events && (
-                    <div className="px-4 pb-4 border-t border-slate-600 bg-slate-700/50 mt-2 pt-2">
-                      {plan.events
-                        .filter((e) => !e.isSystemLog)
-                        .map((ev) => (
-                          <div
-                            key={ev.id}
-                            className="text-sm flex justify-between py-1 border-b border-slate-600/30 last:border-0"
-                          >
-                            <span
-                              className={
-                                ev.isVoid
-                                  ? 'text-slate-400'
-                                  : ev.isWin
-                                  ? 'text-green-300'
-                                  : 'text-red-300'
-                              }
-                            >
-                              #{ev.id}{' '}
-                              {ev.isVoid ? 'VOID' : ev.isWin ? 'WIN' : 'LOSS'}
-                            </span>
-                            <span>€{ev.capitalAfter.toFixed(2)}</span>
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+      {
+        !currentPlan && !showConfig && (
+          <div className="bg-slate-800 p-12 rounded-lg text-center border border-slate-700 border-dashed">
+            <RefreshCw
+              size={48}
+              className="mx-auto mb-4 text-slate-600 animate-spin-slow"
+            />
+            <h3 className="text-xl font-bold mb-2">Nessun Piano Attivo</h3>
+            <p className="text-slate-400 mb-6">
+              Configura i parametri per iniziare un nuovo ciclo
+            </p>
+            <button
+              onClick={() => setShowConfig(true)}
+              className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold transition shadow-lg"
+            >
+              Configura Piano
+            </button>
           </div>
-        </div>
-      )}
-
-      {!currentPlan && (
-        <div className="bg-slate-800 p-12 rounded-lg text-center border border-slate-700 border-dashed">
-          <RefreshCw
-            size={48}
-            className="mx-auto mb-4 text-slate-600 animate-spin-slow"
-          />
-          <h3 className="text-xl font-bold mb-2">Nessun Piano Attivo</h3>
-          <p className="text-slate-400 mb-6">
-            Configura i parametri per iniziare un nuovo ciclo
-          </p>
-          <button
-            onClick={() => setShowConfig(true)}
-            className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold transition shadow-lg"
-          >
-            Configura Piano
-          </button>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 };
 

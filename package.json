@@ -13,6 +13,7 @@
     "lucide-react": "^0.556.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "reaviz": "^16.1.1",
     "recharts": "^3.5.1"
   },
   "devDependencies": {
