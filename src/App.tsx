@@ -1,25 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   TrendingUp,
   Calendar,
   Settings,
-  X,
-  Plus,
-  ArrowRight,
   TrendingDown,
   History as HistoryIcon,
-  Play,
   RotateCcw,
   RefreshCw,
-  CheckCircle2,
   XCircle,
   AlertTriangle,
-  ArrowUpRight,
   ArrowDownRight,
-  Save,
-  Layout,
-  Table as TableIcon,
-  ChevronRight,
   Target,
   PiggyBank,
   Coins,
@@ -27,18 +17,13 @@ import {
   ChevronDown,
   ChevronUp,
   CheckCircle,
-  PieChart,
   CheckSquare,
   Square,
-  AlertOctagon,
   Hash,
-  MinusCircle,
   Calculator,
   LifeBuoy,
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -48,12 +33,95 @@ import {
   Area,
 } from 'recharts';
 
-const roundTwo = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+// --- TYPES ---
+interface Config {
+  initialCapital: number;
+  quota: number;
+  totalEvents: number;
+  expectedWins: number;
+  accumulationPercent: number;
+  weeklyTargetPercentage: number;
+}
+
+interface EventDetail {
+  stake: number;
+  isWin: boolean;
+  netResult: number;
+}
+
+interface MasaEvent {
+  id: number | string;
+  stake: number;
+  isWin: boolean;
+  isVoid: boolean;
+  isPartialSequence: boolean;
+  sequenceDetails?: EventDetail[];
+  capitalAfter: number;
+  eventsLeft: number;
+  winsLeft: number;
+  timestamp: string;
+  isSystemLog?: boolean;
+  message?: string;
+  quota?: number;
+}
+
+interface MasaPlan {
+  id: number;
+  startCapital: number;
+  currentCapital: number;
+  targetCapital: number;
+  maxNetProfit: number;
+  quota: number;
+  totalEvents: number;
+  expectedWins: number;
+  events: MasaEvent[];
+  remainingEvents: number;
+  remainingWins: number;
+  wins: number;
+  losses: number;
+  status: string;
+  triggeredRule: string | null;
+  wasNegative: boolean;
+  accumulatedAmount: number;
+  isRescued: boolean;
+  createdAt: string;
+  generationNumber: number;
+  milestonesBanked?: number;
+}
+
+interface ChartDataPoint {
+  name: string;
+  capital: number;
+  days: number;
+  cycle?: number;
+}
+
+const roundTwo = (num: number) => Math.round((num + Number.EPSILON) * 100) / 100;
+
+const nCr = (n: number, k: number): number => {
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  if (k > n / 2) k = n - k;
+  let res = 1;
+  for (let i = 1; i <= k; i++) {
+    res = (res * (n - i + 1)) / i;
+  }
+  return res;
+};
+
+const calculateMaxNetProfit = (startCapital: number, n: number, k: number, p: number): number => {
+  let denominator = 0;
+  for (let i = k; i <= n; i++) {
+    denominator += nCr(n, i) * Math.pow(p - 1, n - i);
+  }
+  const totalPayout = (startCapital * Math.pow(p, n)) / denominator;
+  return totalPayout - startCapital;
+};
 
 const MasanielloCompound = () => {
-  const [config, setConfig] = useState(() => {
+  const [config, setConfig] = useState<Config>(() => {
     const saved = localStorage.getItem('masa_config');
-    const defaultConfig = {
+    const defaultConfig: Config = {
       initialCapital: 1000,
       quota: 3.0,
       totalEvents: 14,
@@ -64,18 +132,18 @@ const MasanielloCompound = () => {
     return saved ? { ...defaultConfig, ...JSON.parse(saved) } : defaultConfig;
   });
 
-  const [currentPlan, setCurrentPlan] = useState(() => {
+  const [currentPlan, setCurrentPlan] = useState<MasaPlan | null>(() => {
     const saved = localStorage.getItem('masa_current_plan');
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [history, setHistory] = useState<any[]>(() => {
+  const [history, setHistory] = useState<MasaPlan[]>(() => {
     const saved = localStorage.getItem('masa_history');
     return saved ? JSON.parse(saved) : [];
   });
 
   const [showConfig, setShowConfig] = useState(true);
-  const [expandedHistory, setExpandedHistory] = useState(null);
+  const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
   const [rescueEventsToAdd, setRescueEventsToAdd] = useState(2);
   const [sequence, setSequence] = useState<any[]>([]);
   const [isSequenceActive, setIsSequenceActive] = useState(false);
@@ -131,10 +199,10 @@ const MasanielloCompound = () => {
     },
   ];
 
-  const toggleRule = (ruleId) => {
-    setActiveRules((prev) =>
+  const toggleRule = (ruleId: string) => {
+    setActiveRules((prev: string[]) =>
       prev.includes(ruleId)
-        ? prev.filter((id) => id !== ruleId)
+        ? prev.filter((id: string) => id !== ruleId)
         : [...prev, ruleId]
     );
   };
@@ -144,64 +212,22 @@ const MasanielloCompound = () => {
     setIsSequenceActive(false);
   }, [history, currentPlan?.id]);
 
-  // --- CALCOLI MATEMATICI ---
-  const combinations = (n, k) => {
-    if (k > n) return 0;
-    if (k === 0 || k === n) return 1;
-    k = Math.min(k, n - k);
-    let result = 1;
-    for (let i = 0; i < k; i++) {
-      result *= n - i;
-      result /= i + 1;
-    }
-    return Math.round(result);
-  };
 
-  const binomialPMF = (k, n, p) => {
-    const coeff = combinations(n, k);
-    return coeff * Math.pow(p, k) * Math.pow(1 - p, n - k);
-  };
-
-  const binomialCDF = (k, n, p) => {
-    let sum = 0;
-    for (let i = 0; i <= k; i++) {
-      sum += binomialPMF(i, n, p);
-    }
-    return sum;
-  };
-
-  const calculateMaxNetProfit = (capital, totalEvents, expectedWins, quota) => {
-    if (!capital || !totalEvents || !expectedWins || !quota || quota <= 1)
-      return 0;
-
-    const probability = 1 / quota;
-    const cumulativeProb = binomialCDF(
-      expectedWins - 1,
-      totalEvents,
-      probability
-    );
-    const successProb = 1 - cumulativeProb;
-
-    if (successProb <= 0) return 0;
-
-    const netProfit = capital / successProb - capital;
-    return netProfit;
-  };
 
   const calculateStake = (
-    currentCapital,
-    remainingEvents,
-    remainingWins,
-    quota,
-    targetCapital
-  ) => {
+    currentCapital: number,
+    remainingEvents: number,
+    remainingWins: number,
+    quota: number,
+    targetCapital: number
+  ): number => {
     if (remainingWins === 0) return 0;
     if (remainingEvents === 0) return 0;
     if (remainingWins > remainingEvents) return 0;
     if (remainingWins === remainingEvents) return currentCapital;
 
-    const memo = {};
-    const getRequiredCapital = (e, w) => {
+    const memo: Record<string, number> = {};
+    const getRequiredCapital = (e: number, w: number): number => {
       const key = `${e}_${w}`;
       if (memo[key] !== undefined) return memo[key];
       if (w === 0) return targetCapital;
@@ -230,7 +256,7 @@ const MasanielloCompound = () => {
   };
 
   // --- GESTIONE PIANO ---
-  const createNewPlan = (startCapital = null) => {
+  const createNewPlan = (startCapital: number | null = null): MasaPlan => {
     const capital =
       startCapital !== null ? startCapital : config.initialCapital;
     const maxProfit = calculateMaxNetProfit(
@@ -270,7 +296,7 @@ const MasanielloCompound = () => {
     setShowConfig(false);
   };
 
-  const transitionToNextPlan = (closingPlan, reason, ruleId) => {
+  const transitionToNextPlan = (closingPlan: MasaPlan, reason: string, ruleId: string | null) => {
     let amountToBank = 0;
     let milestonesBanked = 0;
 
@@ -280,12 +306,12 @@ const MasanielloCompound = () => {
     if (reason === 'auto_bank_100' && config.accumulationPercent > 0 && cycleProfit > 0) {
       // 1. Calculate how many milestones we've banked so far
       const bankedMilestoneCountBefore = history.reduce(
-        (acc, p) => acc + (p.milestonesBanked || (p.status === 'auto_bank_100' ? 1 : 0)),
+        (acc: number, p: MasaPlan) => acc + (p.milestonesBanked || (p.status === 'auto_bank_100' ? 1 : 0)),
         0
       );
 
       // 2. Calculate how many milestones we are at right now (cumulative profit)
-      const totalBankedSoFar = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
+      const totalBankedSoFar = history.reduce((acc: number, p: MasaPlan) => acc + (p.accumulatedAmount || 0), 0);
       let absoluteStartCap = config.initialCapital;
       if (history.length > 0) absoluteStartCap = history[0].startCapital;
 
@@ -311,7 +337,7 @@ const MasanielloCompound = () => {
 
     const nextCapital = roundTwo(closingPlan.currentCapital - amountToBank);
 
-    const closedPlanWithStats = {
+    const closedPlanWithStats: MasaPlan = {
       ...closingPlan,
       status: reason,
       triggeredRule: ruleId,
@@ -339,7 +365,7 @@ const MasanielloCompound = () => {
   };
 
 
-  const resetPlan = (reason, ruleId, finalPlan) => {
+  const resetPlan = (reason: string, ruleId: string | null, finalPlan: MasaPlan) => {
     transitionToNextPlan(finalPlan, reason, ruleId);
   };
 
@@ -414,7 +440,7 @@ const MasanielloCompound = () => {
   };
 
   // --- LOGICA DI GIOCO ---
-  const handlePartialStep = (isWin) => {
+  const handlePartialStep = (isWin: boolean) => {
     if (!currentPlan) return;
 
     const fullStake = getNextStake();
@@ -425,14 +451,14 @@ const MasanielloCompound = () => {
       ? stakeToUse * (currentPlan.quota - 1)
       : -stakeToUse;
 
-    const newStep = { stake: stakeToUse, isWin, netResult };
+    const newStep: EventDetail = { stake: stakeToUse, isWin, netResult };
     const newSequence = [...sequence, newStep];
 
     const intermediateCapital = roundTwo(
       currentPlan.currentCapital + netResult
     );
 
-    const tempPlan = {
+    const tempPlan: MasaPlan = {
       ...currentPlan,
       currentCapital: intermediateCapital,
     };
@@ -456,7 +482,7 @@ const MasanielloCompound = () => {
     finalizeSequence(fullSequence, tempPlan);
   };
 
-  const finalizeSequence = (finalSequence, planState) => {
+  const finalizeSequence = (finalSequence: EventDetail[], planState: MasaPlan) => {
     let isFullWin = false;
     let isFullLoss = false;
     let isVoid = false;
@@ -472,7 +498,7 @@ const MasanielloCompound = () => {
       else isVoid = true;
     }
 
-    const totalStake = finalSequence.reduce((acc, step) => acc + step.stake, 0);
+    const totalStake = finalSequence.reduce((acc: number, step: EventDetail) => acc + step.stake, 0);
     const nextEventsLeft = isVoid
       ? planState.remainingEvents
       : planState.remainingEvents - 1;
@@ -488,8 +514,8 @@ const MasanielloCompound = () => {
     const isCurrentlyNegative = planState.currentCapital < startCap - 0.01;
     const wasNegativePersistent = planState.wasNegative || isCurrentlyNegative;
 
-    const newEvent = {
-      id: planState.events.filter((e) => !e.isSystemLog).length + 1,
+    const newEvent: MasaEvent = {
+      id: planState.events.filter((e: MasaEvent) => !e.isSystemLog).length + 1,
       stake: totalStake,
       isWin: isFullWin,
       isVoid: isVoid,
@@ -501,7 +527,7 @@ const MasanielloCompound = () => {
       timestamp: new Date().toISOString(),
     };
 
-    const finalPlan = {
+    const finalPlan: MasaPlan = {
       ...planState,
       events: [...planState.events, newEvent],
       remainingEvents: nextEventsLeft,
@@ -517,7 +543,7 @@ const MasanielloCompound = () => {
     if (!isVoid) {
       // 1. PRIORITY: Cumulative Milestone Banking logic
       const totalBankedSoFar = history.reduce(
-        (acc, p) => acc + (p.accumulatedAmount || 0),
+        (acc: number, p: MasaPlan) => acc + (p.accumulatedAmount || 0),
         0
       );
 
@@ -656,12 +682,10 @@ const MasanielloCompound = () => {
   const progressStats = getProgressStats();
 
   const stats = (() => {
-    const currentCapital = currentPlan
-      ? currentPlan.currentCapital
-      : config.initialCapital;
+    const currentCapital = currentPlan ? currentPlan.currentCapital : 0;
 
     const totalBanked = history.reduce(
-      (acc, p) => acc + (p.accumulatedAmount || 0),
+      (acc: number, p: MasaPlan) => acc + (p.accumulatedAmount || 0),
       0
     );
 
@@ -675,12 +699,12 @@ const MasanielloCompound = () => {
     // CALCOLO GIORNI STIMATI
     const totalEventsPlayed =
       history.reduce(
-        (acc, p) =>
-          acc + (p.events ? p.events.filter((e) => !e.isSystemLog).length : 0),
+        (acc: number, p: MasaPlan) =>
+          acc + (p.events ? p.events.filter((e: MasaEvent) => !e.isSystemLog).length : 0),
         0
       ) +
       (currentPlan && currentPlan.events
-        ? currentPlan.events.filter((e) => !e.isSystemLog).length
+        ? currentPlan.events.filter((e: MasaEvent) => !e.isSystemLog).length
         : 0);
     const estimatedDays = Math.round(totalEventsPlayed * 0.4);
 
@@ -697,7 +721,7 @@ const MasanielloCompound = () => {
       totalWorth,
       totalBanked,
       estimatedDays,
-      completedCycles: history.filter((p) =>
+      completedCycles: history.filter((p: MasaPlan) =>
         [
           'completed',
           'profit_90_reset',
@@ -709,15 +733,15 @@ const MasanielloCompound = () => {
       ).length,
       totalCycles: history.length,
       totalWins:
-        history.reduce((acc, p) => acc + p.wins, 0) +
+        history.reduce((acc: number, p: MasaPlan) => acc + p.wins, 0) +
         (currentPlan ? currentPlan.wins : 0),
       totalLosses:
-        history.reduce((acc, p) => acc + p.losses, 0) +
+        history.reduce((acc: number, p: MasaPlan) => acc + p.losses, 0) +
         (currentPlan ? currentPlan.losses : 0),
     };
   })();
 
-  const getRuleStatus = (ruleId) => {
+  const getRuleStatus = (ruleId: string) => {
     const isEnabled = activeRules.includes(ruleId);
     if (!currentPlan) return { active: false, enabled: isEnabled };
     const profitMade = currentPlan.currentCapital - currentPlan.startCapital;
@@ -726,7 +750,7 @@ const MasanielloCompound = () => {
     switch (ruleId) {
       case 'first_win':
         isActive =
-          currentPlan.events.filter((e) => !e.isSystemLog).length === 0;
+          currentPlan.events.filter((e: MasaEvent) => !e.isSystemLog).length === 0;
         break;
       case 'back_positive':
         isActive =
@@ -748,13 +772,13 @@ const MasanielloCompound = () => {
     return { active: isActive, enabled: isEnabled };
   };
 
-  const getChartData = () => {
-    const data = [{ name: 'Start', capital: config.initialCapital, days: 0 }];
+  const getChartData = (): ChartDataPoint[] => {
+    const data: ChartDataPoint[] = [{ name: 'Start', capital: config.initialCapital, days: 0 }];
     let totalEvents = 0;
 
-    history.forEach((plan, index) => {
+    history.forEach((plan: MasaPlan, index: number) => {
       const planEvents = plan.events
-        ? plan.events.filter((e) => !e.isSystemLog).length
+        ? plan.events.filter((e: MasaEvent) => !e.isSystemLog).length
         : 0;
       totalEvents += planEvents;
       const days = Math.round(totalEvents * 0.4);
@@ -769,7 +793,7 @@ const MasanielloCompound = () => {
 
     if (currentPlan) {
       const currentEvents = currentPlan.events
-        ? currentPlan.events.filter((e) => !e.isSystemLog).length
+        ? currentPlan.events.filter((e: MasaEvent) => !e.isSystemLog).length
         : 0;
       const currentTotal = totalEvents + currentEvents;
       const days = Math.round(currentTotal * 0.4);
@@ -787,19 +811,19 @@ const MasanielloCompound = () => {
   const getWeeklyHeatmapData = () => {
     // Usiamo esattamente la stessa logica del box "Profitto Totale"
     const currentCapital = currentPlan
-      ? (currentPlan as any).currentCapital
+      ? currentPlan.currentCapital
       : config.initialCapital;
 
-    const totalBanked = (history as any[]).reduce(
-      (acc, p) => acc + (p.accumulatedAmount || 0),
+    const totalBanked = history.reduce(
+      (acc: number, p: MasaPlan) => acc + (p.accumulatedAmount || 0),
       0
     );
 
     let absoluteStartCapital = config.initialCapital;
     if (history.length > 0) {
-      absoluteStartCapital = (history[0] as any).startCapital;
+      absoluteStartCapital = history[0].startCapital;
     } else if (currentPlan) {
-      absoluteStartCapital = (currentPlan as any).startCapital;
+      absoluteStartCapital = currentPlan.startCapital;
     }
 
     const totalProfit = currentCapital + totalBanked - absoluteStartCapital;
@@ -833,7 +857,7 @@ const MasanielloCompound = () => {
     });
   };
 
-  const CustomTooltip = ({ active, payload, label }) => {
+  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-slate-800 border border-slate-600 p-2 rounded shadow-lg text-xs">
@@ -1616,373 +1640,6 @@ const MasanielloCompound = () => {
         {renderPianoAttivo()}
       </div>
 
-      {/* OLD ACTIVE PLAN - TO BE REMOVED */}
-      {
-        false && currentPlan && progressStats && (
-          <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 mb-6 shadow-xl">
-            {/* RESCUE MODE BANNER - appare solo se critico */}
-            {progressStats.isCritical && !currentPlan.isRescued && (
-              <div className="relative mb-6 -mx-6 -mt-6 bg-red-600 text-white p-4 rounded-t-lg shadow-md animate-in slide-in-from-top-2">
-                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 font-bold text-lg">
-                      <AlertTriangle size={24} className="text-yellow-300" />
-                      SOGLIA CRITICA (80% Perdite)
-                    </div>
-                    <div className="text-sm text-red-100 opacity-90 mt-1">
-                      Rischio fallimento elevato. Attiva il salvagente per ridurre
-                      la varianza.
-                    </div>
-                  </div>
-
-                  <div className="bg-red-800/50 p-3 rounded border border-red-500/50 flex flex-col gap-2 min-w-[300px]">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="opacity-70">Target Attuale:</span>
-                      <span className="font-bold">
-                        €{currentPlan.targetCapital.toFixed(2)}
-                      </span>
-                    </div>
-                    {rescueProjection && (
-                      <div className="flex justify-between items-center text-sm text-yellow-300">
-                        <span className="flex items-center gap-1">
-                          <ArrowDownRight size={14} /> Nuovo Target:
-                        </span>
-                        <span className="font-bold text-lg">
-                          €{rescueProjection.target.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                    <div className="h-px bg-red-500/50 my-1"></div>
-                    <div className="flex gap-2 items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold uppercase">
-                          Aggiungi:
-                        </span>
-                        <select
-                          value={rescueEventsToAdd}
-                          onChange={(e) => setRescueEventsToAdd(Number(e.target.value))}
-                          className="bg-white text-red-700 border-0 rounded px-2 py-1 text-sm font-bold outline-none cursor-pointer"
-                        >
-                          <option value="1">+1 Evento</option>
-                          <option value="2">+2 Eventi</option>
-                          <option value="3">+3 Eventi</option>
-                          <option value="4">+4 Eventi</option>
-                          <option value="5">+5 Eventi</option>
-                        </select>
-                      </div>
-                      <button
-                        onClick={activateRescueMode}
-                        className="bg-yellow-400 hover:bg-yellow-300 text-red-900 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 shadow transition-colors"
-                      >
-                        <LifeBuoy size={16} /> ATTIVA
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {currentPlan.isRescued && (
-              <div className="absolute top-4 right-4 bg-orange-600/20 border border-orange-500 text-orange-200 px-3 py-1 rounded text-xs font-bold flex items-center gap-2">
-                <LifeBuoy size={14} /> SALVAGENTE ATTIVO
-              </div>
-            )}
-
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold flex items-center gap-2">
-                PIANO ATTIVO
-                {currentPlan.isRescued && (
-                  <span className="text-xs text-orange-400 border border-orange-500 rounded px-1">
-                    MODIFICATO
-                  </span>
-                )}
-              </h2>
-              <div className="flex items-center gap-2">
-                <div className="text-sm px-3 py-1.5 bg-blue-900/50 rounded border border-blue-800 font-medium">
-                  {currentPlan.totalEvents}E / {currentPlan.expectedWins}V
-                </div>
-                <button
-                  onClick={() => setShowConfig(true)}
-                  className="px-3 py-1.5 bg-slate-700/50 hover:bg-slate-700 border border-slate-600 rounded text-sm flex items-center gap-2 transition-colors"
-                >
-                  <Settings size={14} /> Opzioni
-                </button>
-              </div>
-            </div>
-
-            {/* STATS CARDS */}
-            <div className="grid grid-cols-4 gap-3 mb-6">
-              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
-                <div className="text-3xl font-medium text-white mb-1">€{currentPlan.currentCapital.toFixed(0)}</div>
-                <div className="text-xs text-slate-400 uppercase tracking-wider">Capitale</div>
-              </div>
-              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
-                <div className="text-3xl font-medium text-blue-400 mb-1">
-                  {progressStats.eventsPlayed}/{currentPlan.totalEvents}
-                </div>
-                <div className="text-xs text-slate-400 uppercase tracking-wider">Eventi</div>
-              </div>
-              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4 text-center">
-                <div className="text-3xl font-medium text-green-400 mb-1">
-                  {progressStats.structuralWins}/{currentPlan.expectedWins}
-                </div>
-                <div className="text-xs text-slate-400 uppercase tracking-wider">Vittorie</div>
-              </div>
-              <div className={`bg-slate-800/50 border rounded-lg p-4 text-center ${progressStats.isCritical ? 'border-red-500/50' : 'border-slate-700'
-                }`}>
-                <div className={`text-3xl font-bold mb-1 ${progressStats.isCritical ? 'text-red-500 animate-pulse' : 'text-red-400'
-                  }`}>
-                  {progressStats.structuralLosses}/{progressStats.totalAllowedErrors}
-                </div>
-                <div className="text-xs text-slate-400 uppercase tracking-wider">Errori</div>
-              </div>
-            </div>
-
-            {/* BETTING BOX */}
-            <div
-              className={`p-6 rounded-lg mb-4 shadow-lg relative overflow-hidden transition-colors duration-300 ${isSequenceActive
-                ? 'bg-gradient-to-r from-indigo-900 to-slate-800 border border-indigo-500/50'
-                : 'bg-gradient-to-r from-blue-600 to-blue-700'
-                }`}
-            >
-              <div className="relative z-10">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-lg text-blue-50 font-black tracking-wider flex items-center gap-3">
-                    <RefreshCw size={18} className={isSequenceActive ? 'animate-spin-slow' : ''} />
-                    <span>
-                      {isSequenceActive
-                        ? `SEQUENZA (STEP ${sequence.length + 1}/2)`
-                        : 'PROSSIMA PUNTATA'}
-                    </span>
-                  </div>
-                  <div className="text-3xl font-black tracking-tight text-white flex items-baseline gap-1">
-                    <span className="text-lg font-medium opacity-50">€</span>
-                    {isSequenceActive
-                      ? sequence[0].stake.toFixed(2)
-                      : targetStake.toFixed(2)}
-                    {isSequenceActive && (
-                      <span className="text-xs text-indigo-300 ml-2 font-bold px-2 py-0.5 bg-black/20 rounded-full">
-                        quota 50%
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Sequence Visualizer */}
-                {isSequenceActive && (
-                  <div className="flex gap-2 mt-4 pt-3 border-t border-white/10">
-                    {sequence.map((step, idx) => (
-                      <span
-                        key={idx}
-                        className={`px-3 py-1 rounded text-xs font-bold border ${step.isWin
-                          ? 'bg-green-500/20 border-green-500 text-green-300'
-                          : 'bg-red-500/20 border-red-500 text-red-300'
-                          }`}
-                      >
-                        {idx + 1}°: {step.isWin ? 'VINTO' : 'PERSO'}
-                      </span>
-                    ))}
-                    <span className="px-3 py-1 rounded text-xs font-bold border border-white/30 text-white/50 animate-pulse">
-                      2°: In attesa...
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* COLLAPSIBLE RULES */}
-            <div className="mb-6">
-              <button
-                onClick={() => setRulesExpanded(!rulesExpanded)}
-                className="w-full flex items-center justify-between px-4 py-3 bg-slate-800/30 hover:bg-slate-800/50 border border-slate-700/50 rounded-lg transition-colors text-left"
-              >
-                <div className="flex items-center gap-2 text-sm">
-                  <CheckCircle size={16} className="text-green-500/70" />
-                  <span className="font-medium text-slate-300">
-                    Regole Automatiche Attive: {activeRules.length}
-                  </span>
-                </div>
-                <ChevronDown
-                  size={18}
-                  className={`text-slate-400 transition-transform ${rulesExpanded ? 'rotate-180' : ''
-                    }`}
-                />
-              </button>
-              {rulesExpanded && (
-                <div className="mt-2 p-4 bg-slate-900/40 border border-slate-700/30 rounded-lg">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {RULES.map((rule) => {
-                      const status = getRuleStatus(rule.id);
-                      return (
-                        <div
-                          key={rule.id}
-                          onClick={() => toggleRule(rule.id)}
-                          className={`px-3 py-2 rounded text-xs flex items-center gap-3 cursor-pointer border select-none transition-colors ${status.enabled
-                            ? 'bg-slate-700/40 border-slate-600/50 text-slate-300 hover:bg-slate-700/60'
-                            : 'bg-slate-800/20 border-slate-800 text-slate-500 opacity-40 hover:opacity-60'
-                            }`}
-                        >
-                          {status.enabled ? (
-                            <CheckSquare size={13} className="text-green-500/70" />
-                          ) : (
-                            <Square size={13} />
-                          )}
-                          <span
-                            className={
-                              !status.enabled ? 'line-through decoration-slate-700' : ''
-                            }
-                          >
-                            {rule.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* CONTROLS */}
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              {!isSequenceActive ? (
-                // MODE STANDARD: VINTA 50% / PERSA 50%
-                <>
-                  <button
-                    onClick={() => handleFullBet(true)}
-                    className="py-5 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-[1.02]"
-                  >
-                    VINTA (100%)
-                  </button>
-                  <button
-                    onClick={() => handlePartialStep(true)}
-                    className="py-5 bg-green-500/80 hover:bg-green-500 border-2 border-green-400/50 rounded-lg font-bold text-lg shadow-lg flex flex-col items-center justify-center leading-tight text-white transition-all hover:scale-[1.02]"
-                  >
-                    <span>VINTA (50%)</span>
-                    <span className="text-xs font-normal opacity-90 mt-1">
-                      Importo: €{partialBtnAmount.toFixed(2)}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => handleFullBet(false)}
-                    className="py-5 bg-red-600 hover:bg-red-700 rounded-lg font-bold text-lg shadow-lg transition-all hover:scale-[1.02]"
-                  >
-                    PERSA (100%)
-                  </button>
-                  <button
-                    onClick={() => handlePartialStep(false)}
-                    className="py-5 bg-red-500/80 hover:bg-red-500 border-2 border-red-400/50 rounded-lg font-bold text-lg shadow-lg flex flex-col items-center justify-center leading-tight text-white transition-all hover:scale-[1.02]"
-                  >
-                    <span>PERSA (50%)</span>
-                    <span className="text-xs font-normal opacity-90 mt-1">
-                      Importo: €{partialBtnAmount.toFixed(2)}
-                    </span>
-                  </button>
-                </>
-              ) : (
-                // MODE SEQUENZA ATTIVA
-                <>
-                  <button
-                    onClick={() => handlePartialStep(true)}
-                    className="py-6 bg-green-500 hover:bg-green-600 rounded-lg font-bold text-xl shadow-lg flex flex-col items-center justify-center text-white transition-all hover:scale-[1.02]"
-                  >
-                    <span>2° VINTA</span>
-                    <span className="text-xs opacity-90 font-normal mt-1">
-                      Importo: €{partialBtnAmount.toFixed(2)}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => handlePartialStep(false)}
-                    className="py-6 bg-red-500 hover:bg-red-600 rounded-lg font-bold text-xl shadow-lg flex flex-col items-center justify-center text-white transition-all hover:scale-[1.02]"
-                  >
-                    <span>2° PERSA</span>
-                    <span className="text-xs opacity-90 font-normal mt-1">
-                      Importo: €{partialBtnAmount.toFixed(2)}
-                    </span>
-                  </button>
-                </>
-              )}
-            </div>
-
-            {/* EVENTS LIST */}
-            <div className="bg-slate-700/30 p-4 rounded-lg border border-slate-700">
-              <h3 className="font-bold mb-3 text-sm text-slate-300">
-                Eventi ({currentPlan.events.filter((e) => !e.isSystemLog).length})
-              </h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                {[...currentPlan.events].reverse().map((event) => (
-                  <div
-                    key={event.id}
-                    className={`p-3 rounded flex justify-between items-center ${event.isSystemLog
-                      ? 'bg-orange-900/40 border border-orange-500/50 text-orange-200'
-                      : event.isVoid
-                        ? 'bg-slate-600/30 border-l-4 border-slate-500 text-slate-300'
-                        : event.isWin
-                          ? 'bg-green-900/20 border-l-4 border-green-500'
-                          : 'bg-red-900/20 border-l-4 border-red-500'
-                      }`}
-                  >
-                    {event.isSystemLog ? (
-                      <div className="w-full flex justify-between items-center">
-                        <span className="font-bold text-sm flex items-center gap-2">
-                          <LifeBuoy size={16} /> {event.message}
-                        </span>
-                        <span className="text-xs">
-                          {new Date(event.timestamp).toLocaleTimeString()}
-                        </span>
-                      </div>
-                    ) : (
-                      <>
-                        <div>
-                          <div className="font-bold text-sm flex items-center gap-2">
-                            #{event.id} -{' '}
-                            {event.isVoid
-                              ? 'NULLO (VOID)'
-                              : event.isWin
-                                ? 'VINTO'
-                                : 'PERSO'}
-                          </div>
-                          <div className="text-xs text-slate-400 mt-1 flex gap-2">
-                            {event.isPartialSequence &&
-                              event.sequenceDetails &&
-                              event.sequenceDetails.map((part, i) => (
-                                <span
-                                  key={i}
-                                  className={`px-1.5 rounded text-[10px] border ${part.isWin
-                                    ? 'border-green-500/50 text-green-300'
-                                    : 'border-red-500/50 text-red-300'
-                                    }`}
-                                >
-                                  {part.isWin ? 'W' : 'L'}
-                                </span>
-                              ))}
-                            {!event.isPartialSequence && (
-                              <span>Puntata: €{event.stake.toFixed(2)}</span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-bold">
-                            €{event.capitalAfter.toFixed(2)}
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            {event.isPartial ? (
-                              <span className="text-indigo-300">
-                                In attesa risoluzione...
-                              </span>
-                            ) : (
-                              `${event.eventsLeft} rim. / ${event.winsLeft} vitt. rim.`
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )
-      }
 
       {/* HISTORY */}
       {
