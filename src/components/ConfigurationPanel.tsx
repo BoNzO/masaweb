@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, PiggyBank, Calculator, AlertTriangle } from 'lucide-react';
+import { Settings, PiggyBank, Calculator, AlertTriangle, TrendingUp } from 'lucide-react';
 import type { Config } from '../types/masaniello';
 import { roundTwo, calculateMaxNetProfit } from '../utils/mathUtils';
 
@@ -134,6 +134,47 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
                         />
                         <span className="font-bold w-16 text-right text-red-400">{config.stopLossPercentage}%</span>
                     </div>
+                </div>
+
+                <div className="col-span-2 bg-blue-900/20 p-3 rounded border border-blue-500/20">
+                    <label className="block text-sm text-blue-300 mb-2 font-bold flex items-center gap-2">
+                        <TrendingUp size={16} /> Trailing Profit Stop (Lock Gains)
+                    </label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="text-[10px] uppercase font-bold text-slate-400">Attivazione (% Profitto Max)</label>
+                                <span className="text-xs font-bold text-blue-400">{config.trailingProfitActivation || 30}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="10"
+                                max="90"
+                                step="5"
+                                value={config.trailingProfitActivation || 30}
+                                onChange={(e) => setConfig({ ...config, trailingProfitActivation: parseInt(e.target.value) })}
+                                className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="text-[10px] uppercase font-bold text-slate-400">Lock (% Profitto Garantito)</label>
+                                <span className="text-xs font-bold text-blue-400">{config.trailingProfitLock || 10}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="5"
+                                max="80"
+                                step="5"
+                                value={config.trailingProfitLock || 10}
+                                onChange={(e) => setConfig({ ...config, trailingProfitLock: parseInt(e.target.value) })}
+                                className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                            />
+                        </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-2 italic leading-tight">
+                        Esempio: Se raggiungi il {config.trailingProfitActivation || 30}% del profitto massimo atteso, il sistema chiuderà automaticamente il ciclo se il profitto scende sotto il {config.trailingProfitLock || 10}% del massimo, garantendo un guadagno minimo.
+                    </p>
                 </div>
 
                 <div className="col-span-2 bg-slate-700/50 p-3 rounded border border-slate-500/20">

@@ -15,6 +15,8 @@ export const useMasaniello = () => {
             weeklyTargetPercentage: 20,
             milestoneBankPercentage: 20,
             stopLossPercentage: 100,
+            trailingProfitActivation: 30, // Default: Activate when 30% of max profit reached
+            trailingProfitLock: 10,       // Default: Lock 10% profit minimum
         };
         return saved ? { ...defaultConfig, ...JSON.parse(saved) } : defaultConfig;
     });
@@ -41,6 +43,7 @@ export const useMasaniello = () => {
             'smart_auto_close',
             'profit_milestone',
             'stop_loss',
+            'trailing_profit_stop',
         ];
     });
 
@@ -262,16 +265,16 @@ export const useMasaniello = () => {
                 return;
             }
 
-            if (activeRules.includes('first_win') && !finalPlan.isRescued && isFullWin && planState.losses === 0) {
+            if (activeRules.includes('first_win') && isFullWin && planState.losses === 0) {
                 transitionToNextPlan(finalPlan, 'first_win_close', 'first_win');
                 return;
             }
-            if (activeRules.includes('back_positive') && !finalPlan.isRescued && planState.wasNegative && planState.currentCapital >= startCap - 0.01) {
+            if (activeRules.includes('back_positive') && planState.wasNegative && planState.currentCapital >= startCap - 0.01) {
                 transitionToNextPlan(finalPlan, 'back_positive_close', 'back_positive');
                 return;
             }
             const profitMade = planState.currentCapital - startCap;
-            if (activeRules.includes('profit_90') && !finalPlan.isRescued && profitMade >= planState.maxNetProfit * 0.9) {
+            if (activeRules.includes('profit_90') && profitMade >= planState.maxNetProfit * 0.9) {
                 transitionToNextPlan(finalPlan, 'profit_90_reset', 'profit_90');
                 return;
             }
@@ -286,7 +289,7 @@ export const useMasaniello = () => {
             const eventsPlayed = finalPlan.totalEvents - nextEventsLeft;
             const progressPercent = eventsPlayed / finalPlan.totalEvents;
             const capitalRetention = finalPlan.currentCapital / finalPlan.startCapital;
-            if (activeRules.includes('smart_auto_close') && !finalPlan.isRescued && progressPercent > 0.65 && capitalRetention > 0.90) {
+            if (activeRules.includes('smart_auto_close') && progressPercent > 0.65 && capitalRetention > 0.90) {
                 transitionToNextPlan(finalPlan, 'smart_auto_close', 'smart_auto_close');
                 return;
             }
@@ -294,6 +297,26 @@ export const useMasaniello = () => {
             const drawdown = (finalPlan.startCapital - finalPlan.currentCapital) / finalPlan.startCapital;
             if (activeRules.includes('stop_loss') && drawdown >= config.stopLossPercentage / 100) {
                 transitionToNextPlan(finalPlan, 'stop_loss_triggered', 'stop_loss');
+                transitionToNextPlan(finalPlan, 'stop_loss_triggered', 'stop_loss');
+                return;
+            }
+
+            // Trailing Profit Logic
+            const trailingActivationThreshold = finalPlan.maxNetProfit * ((config.trailingProfitActivation || 30) / 100);
+            const trailingLockThreshold = finalPlan.maxNetProfit * ((config.trailingProfitLock || 10) / 100);
+
+            // Check if we ever reached the activation threshold in this plan's history
+            const peakCapital = Math.max(finalPlan.startCapital, ...finalPlan.events.map(e => e.capitalAfter));
+            const peakProfitGenerated = peakCapital - finalPlan.startCapital;
+            const currentProfitGenerated = finalPlan.currentCapital - finalPlan.startCapital;
+
+            if (
+                activeRules.includes('trailing_profit_stop') &&
+                peakProfitGenerated >= trailingActivationThreshold && // Activated because we reached peak
+                currentProfitGenerated <= trailingLockThreshold && // Fell below lock zone
+                currentProfitGenerated > 0 // But still profitable
+            ) {
+                transitionToNextPlan(finalPlan, 'trailing_stop_profit', 'trailing_profit_stop');
                 return;
             }
         }

@@ -120,3 +120,75 @@ export const getRescueSuggestion = (
         estimatedStake: best.stake
     };
 };
+
+export const getEarlyClosureSuggestion = (
+    currentPlan: {
+        startCapital: number;
+        currentCapital: number;
+        quota: number;
+        totalEvents: number;
+        expectedWins: number;
+        remainingEvents: number;
+        remainingWins: number;
+        maxNetProfit: number;
+    } | null
+) => {
+    if (!currentPlan) return null;
+
+    const { startCapital, currentCapital, maxNetProfit, remainingEvents, remainingWins } = currentPlan;
+    const currentProfit = currentCapital - startCapital;
+
+    // Condition 1: High Yield reached (>85% of max profit)
+    const yieldReached = currentProfit / maxNetProfit;
+
+    // Condition 2: High Risk on remaining steps (last steps often require huge stakes)
+    // If we have few steps left and still need wins, the stake is likely high.
+    // Simplifying: if remainingWins > 0 and remainingEvents <= 2 and we have already secured good profit.
+    if (yieldReached > 0.85 && remainingWins > 0 && remainingEvents <= 3) {
+        return {
+            shouldClose: true,
+            reason: `Hai raggiunto il ${(yieldReached * 100).toFixed(0)}% del profitto massimo. Rischiare per il restante ${(100 - yieldReached * 100).toFixed(0)}% potrebbe non valere la pena.`,
+            profitSecure: currentProfit
+        };
+    }
+
+    return null;
+};
+
+export const checkValueBet = (
+    stake: number,
+    quota: number,
+    currentCapital: number,
+    remainingWins: number,
+    remainingEvents: number
+): { status: 'good' | 'warning' | 'critical', message: string, riskPercent: number } | null => {
+    // 1. Calculate Risk Impact
+    const riskPercent = (stake / currentCapital) * 100;
+    const potentialWin = stake * (quota - 1);
+    const rewardToRisk = potentialWin / stake; // effectively (Quota - 1)
+
+    // 2. Risk/Reward Analysis
+    let status: 'good' | 'warning' | 'critical' = 'good';
+    let message = '';
+
+    // Critical: High Risk for Low Reward (e.g., chasing small remaining profit with huge stake)
+    if (riskPercent > 25 && rewardToRisk < 0.5) {
+        status = 'critical';
+        message = `⚠️ Rischio eccessivo (${riskPercent.toFixed(1)}% cap) per un rendimento basso. Valuta di chiudere o spalmare su più eventi via Rescue.`;
+        return { status, message, riskPercent };
+    }
+    // Warning: Very High Stake
+    else if (riskPercent > 35) {
+        status = 'warning';
+        message = `⚠️ Stake molto alto (${riskPercent.toFixed(1)}% del capitale). Assicurati che l'evento sia ad alta affidabilità o usa Rescue per dividere l'importo.`;
+        return { status, message, riskPercent };
+    }
+    // Warning: Last chance pressure
+    else if (remainingEvents === remainingWins && remainingEvents > 0) {
+        status = 'warning';
+        message = `⚠️ "Must Win": Non puoi più sbagliare. Pressione massima.`;
+        return { status, message, riskPercent };
+    }
+
+    return null;
+};

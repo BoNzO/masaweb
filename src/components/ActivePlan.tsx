@@ -14,10 +14,20 @@ import {
     History as HistoryIcon,
     TrendingUp,
     TrendingDown,
+    ShieldAlert,
 } from 'lucide-react';
 import type { MasaPlan, EventDetail, Rule } from '../types/masaniello';
+// This part needs careful surgery.
+// First, adding import:
+import { getEarlyClosureSuggestion, checkValueBet } from '../utils/masaLogic';
+
+// Then fixing the JSX block around line 382/385.
+// The previous edit inserted a </div> and then an expression.
+// We need to remove the extra </div> and place the expression correctly.
+
 
 interface ActivePlanProps {
+    initialCapital: number;
     currentPlan: MasaPlan;
     isSequenceActive: boolean;
     sequence: EventDetail[];
@@ -30,6 +40,7 @@ interface ActivePlanProps {
     onBreakEven: () => void;
     onAdjustment: (amount: number, isWinEquivalent: boolean) => void;
     onActivateRescue: (events: number, target?: number, wins?: number, extraCap?: number) => void;
+    onEarlyClose: () => void;
     getNextStake: (quota?: number) => number;
     getRescueSuggestion: (extraCap?: number) => {
         eventsToAdd: number;
@@ -41,6 +52,7 @@ interface ActivePlanProps {
 }
 
 const ActivePlan: React.FC<ActivePlanProps> = ({
+    initialCapital,
     currentPlan,
     isSequenceActive,
     sequence,
@@ -53,6 +65,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     onBreakEven,
     onAdjustment,
     onActivateRescue,
+    onEarlyClose,
     getNextStake,
     getRescueSuggestion,
 }) => {
@@ -62,11 +75,14 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     const [extraCap, setExtraCap] = useState(0);
 
     const suggestion = getRescueSuggestion(extraCap);
+    const earlyClosure = getEarlyClosureSuggestion(currentPlan);
 
     const eventsPlayed = currentPlan.totalEvents - currentPlan.remainingEvents;
     const structuralWins = currentPlan.expectedWins - currentPlan.remainingWins;
     const structuralLosses = currentPlan.totalEvents - currentPlan.expectedWins - (currentPlan.remainingEvents - currentPlan.remainingWins);
     const totalAllowedErrors = currentPlan.totalEvents - currentPlan.expectedWins;
+    const remainingAllowedErrors = totalAllowedErrors - structuralLosses;
+    const tiltThreshold = Math.max(2, Math.ceil(remainingAllowedErrors * 0.3));
     const isCritical = structuralLosses >= totalAllowedErrors * 0.8 && totalAllowedErrors > 0;
     const isRescueNeededAfterWins = currentPlan.isRescued && currentPlan.remainingWins === 0 && currentPlan.currentCapital < currentPlan.startCapital - 0.01;
 
@@ -76,6 +92,58 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     return (
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden">
             <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 blur-[100px] pointer-events-none" />
+
+            {earlyClosure?.shouldClose && (
+                <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-emerald-600 to-green-700 text-white p-5 rounded-t-xl shadow-lg border-b border-emerald-500/30 animate-in slide-in-from-top-2">
+                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md shrink-0">
+                                <TrendingUp size={24} className="text-white" />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="font-extrabold text-lg tracking-tight uppercase flex items-center gap-2">
+                                    Take Profit Intelligente <span className="bg-white/20 text-xs px-2 py-0.5 rounded font-bold">ALGORITMO</span>
+                                </div>
+                                <div className="text-xs text-emerald-100/90 leading-relaxed max-w-lg font-medium">
+                                    {earlyClosure.reason}
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            onClick={onEarlyClose}
+                            className="bg-white text-emerald-800 hover:bg-emerald-50 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all hover:scale-105 active:scale-95 whitespace-nowrap"
+                        >
+                            <CheckCircle size={16} /> Chiudi Ciclo & Massimizza (€{earlyClosure.profitSecure.toFixed(2)})
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses >= tiltThreshold && !currentPlan.isRescued && (
+                <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-5 rounded-t-xl shadow-lg border-b border-indigo-500/30 animate-in slide-in-from-top-2">
+                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-indigo-500/20 rounded-lg backdrop-blur-md shrink-0 border border-indigo-500/30">
+                                <ShieldAlert size={24} className="text-indigo-300" />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="font-extrabold text-lg tracking-tight uppercase flex items-center gap-2 text-indigo-100">
+                                    Anti-Tilt Protection <span className="bg-indigo-500/30 text-[10px] px-2 py-0.5 rounded font-bold border border-indigo-400/30">STREAK NEGATIVA</span>
+                                </div>
+                                <div className="text-xs text-indigo-200/80 leading-relaxed max-w-lg font-medium">
+                                    Rilevati {currentPlan.currentConsecutiveLosses} loss consecutivi. L'algoritmo suggerisce di attivare la "Modalità Difensiva": estendi il piano di 1 evento per abbassare drasticamente la prossima puntata e recuperare lucidità.
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => onActivateRescue(1, currentPlan.targetCapital, 0, 0)}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/50 transition-all hover:scale-105 active:scale-95 whitespace-nowrap border border-indigo-400/20"
+                        >
+                            <LifeBuoy size={16} /> Abbassa Stake (Safety +1)
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {isCritical && !currentPlan.isRescued && (
                 <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-red-600 to-rose-700 text-white p-5 rounded-t-xl shadow-lg border-b border-red-500/30 animate-in slide-in-from-top-2">
@@ -225,54 +293,127 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 relative z-10">
-                {[
-                    { label: 'Capitale', value: `€${currentPlan.currentCapital.toFixed(0)}`, icon: <PiggyBank size={18} />, color: 'text-white' },
-                    { label: 'Eventi', value: `${eventsPlayed}/${currentPlan.totalEvents}`, icon: <Calendar size={18} />, color: 'text-blue-400' },
-                    { label: 'Vittorie', value: `${structuralWins}/${currentPlan.expectedWins}`, icon: <Trophy size={18} />, color: 'text-green-400' },
-                    {
-                        label: 'Errori',
-                        value: `${structuralLosses}/${totalAllowedErrors}`,
-                        icon: <XCircle size={18} />,
-                        color: isCritical ? 'text-red-500 animate-pulse' : 'text-red-400',
-                    },
-                ].map((stat, i) => (
-                    <div
-                        key={i}
-                        className={`bg-gradient-to-br from-slate-800 to-slate-900 border ${stat.label === 'Errori' && isCritical ? 'border-red-500/30' : 'border-slate-700/50'} rounded-xl p-4 transition-all hover:border-slate-600 group`}
-                    >
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className={`p-1.5 rounded-lg bg-slate-900/50 ${stat.color} group-hover:scale-110 transition-transform`}>{stat.icon}</div>
-                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{stat.label}</span>
-                        </div>
-                        <div className={`text-2xl font-medium ${stat.color} tracking-tight`}>{stat.value}</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 relative z-10">
+                {/* Capital Card */}
+                <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-xl p-5 shadow-lg relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <PiggyBank size={48} className="text-white" />
                     </div>
-                ))}
+                    <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
+                            <PiggyBank size={14} className="text-blue-400" /> Capitale Attuale
+                        </span>
+                        {currentPlan.currentCapital >= initialCapital ? (
+                            <span className="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded font-black flex items-center gap-1">
+                                <TrendingUp size={10} /> +{(currentPlan.currentCapital - initialCapital).toFixed(2)}€
+                            </span>
+                        ) : (
+                            <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded font-black flex items-center gap-1">
+                                <TrendingDown size={10} /> {(currentPlan.currentCapital - initialCapital).toFixed(2)}€
+                            </span>
+                        )}
+                    </div>
+                    <div className="text-3xl font-black text-white tracking-tight mb-1">
+                        €{currentPlan.currentCapital.toFixed(2)}
+                    </div>
+                    <div className="w-full bg-slate-700/50 h-1.5 rounded-full overflow-hidden mt-2">
+                        <div
+                            className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-all duration-700"
+                            style={{ width: `${Math.min(100, (currentPlan.currentCapital / currentPlan.targetCapital) * 100)}%` }}
+                        />
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-bold uppercase text-right mt-1">
+                        Target: €{currentPlan.targetCapital.toFixed(2)}
+                    </div>
+                </div>
 
-                {currentPlan.maxConsecutiveLosses && currentPlan.maxConsecutiveLosses > 0 ? (
-                    <div className="col-span-2 md:col-span-4 bg-gradient-to-r from-orange-500/5 to-red-500/5 border border-orange-500/10 rounded-xl p-3 flex justify-between items-center group">
+                {/* Progress Stats Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                    {/* Events Progress */}
+                    <div className="bg-slate-800/50 border border-slate-700/30 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
+                        <div className="flex justify-between items-start z-10">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
+                                <Calendar size={14} className="text-blue-400" /> Eventi
+                            </span>
+                            <span className="text-xs font-black text-white">{eventsPlayed}/{currentPlan.totalEvents}</span>
+                        </div>
+                        <div className="mt-3 relative z-10">
+                            <div className="w-full bg-slate-700/50 h-1.5 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)] transition-all duration-700"
+                                    style={{ width: `${(eventsPlayed / currentPlan.totalEvents) * 100}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Wins Progress */}
+                    <div className="bg-slate-800/50 border border-slate-700/30 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
+                        <div className="absolute inset-0 bg-green-500/5 opacity-0 hover:opacity-100 transition-opacity" />
+                        <div className="flex justify-between items-start z-10">
+                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
+                                <Trophy size={14} className="text-green-400" /> Vittorie
+                            </span>
+                            <span className="text-xs font-black text-white">{structuralWins}/{currentPlan.expectedWins}</span>
+                        </div>
+                        <div className="mt-3 relative z-10">
+                            <div className="w-full bg-slate-700/50 h-1.5 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] transition-all duration-700"
+                                    style={{ width: `${(structuralWins / currentPlan.expectedWins) * 100}%` }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Errors Margin */}
+                    <div className={`col-span-2 bg-slate-800/50 border ${isCritical ? 'border-red-500/40 bg-red-500/5' : 'border-slate-700/30'} rounded-xl p-3 flex items-center justify-between relative overflow-hidden transition-colors duration-500`}>
                         <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg bg-orange-900/20 text-orange-400 group-hover:scale-110 transition-transform ${currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses > 0 ? 'animate-pulse' : ''}`}>
-                                <AlertTriangle size={16} />
+                            <div className={`p-2 rounded-lg ${isCritical ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-slate-700/50 text-slate-400'}`}>
+                                <XCircle size={16} />
                             </div>
                             <div>
-                                <div className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Condizione: Max {currentPlan.maxConsecutiveLosses} Rossi</div>
-                                <div className="text-xs font-bold text-slate-200">
-                                    Strike Attuale: <span className={currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses >= currentPlan.maxConsecutiveLosses ? 'text-red-500' : 'text-orange-400'}>{currentPlan.currentConsecutiveLosses || 0}</span>
+                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Margine Errori</div>
+                                <div className={`text-xs font-black ${isCritical ? 'text-red-400' : 'text-slate-300'}`}>
+                                    {structuralLosses} commessi <span className="text-slate-600 font-normal">/</span> {totalAllowedErrors} totali
                                 </div>
                             </div>
                         </div>
                         <div className="flex gap-1">
-                            {Array.from({ length: currentPlan.maxConsecutiveLosses }).map((_, idx) => (
+                            {Array.from({ length: totalAllowedErrors }).map((_, idx) => (
                                 <div
                                     key={idx}
-                                    className={`w-2.5 h-2.5 rounded-full border ${idx < (currentPlan.currentConsecutiveLosses || 0) ? 'bg-red-500 border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-slate-700 border-slate-600'}`}
+                                    className={`w-1.5 h-6 rounded-full transition-all duration-500 ${idx < structuralLosses ? 'bg-red-500/80 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-700/30'}`}
                                 />
                             ))}
                         </div>
                     </div>
-                ) : null}
+                </div>
             </div>
+
+            {currentPlan.maxConsecutiveLosses && currentPlan.maxConsecutiveLosses > 0 ? (
+                <div className="col-span-2 md:col-span-4 bg-gradient-to-r from-orange-500/5 to-red-500/5 border border-orange-500/10 rounded-xl p-3 flex justify-between items-center group">
+                    <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-lg bg-orange-900/20 text-orange-400 group-hover:scale-110 transition-transform ${currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses > 0 ? 'animate-pulse' : ''}`}>
+                            <AlertTriangle size={16} />
+                        </div>
+                        <div>
+                            <div className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Condizione: Max {currentPlan.maxConsecutiveLosses} Rossi</div>
+                            <div className="text-xs font-bold text-slate-200">
+                                Strike Attuale: <span className={currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses >= currentPlan.maxConsecutiveLosses ? 'text-red-500' : 'text-orange-400'}>{currentPlan.currentConsecutiveLosses || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex gap-1">
+                        {Array.from({ length: currentPlan.maxConsecutiveLosses }).map((_, idx) => (
+                            <div
+                                key={idx}
+                                className={`w-2.5 h-2.5 rounded-full border ${idx < (currentPlan.currentConsecutiveLosses || 0) ? 'bg-red-500 border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-slate-700 border-slate-600'}`}
+                            />
+                        ))}
+                    </div>
+                </div>
+            ) : null}
 
             <div
                 className={`p-4 rounded-2xl mb-5 shadow-2xl relative overflow-hidden transition-all duration-500 group ${isSequenceActive ? 'bg-gradient-to-br from-indigo-700 to-slate-900 border-2 border-indigo-500/30' : 'bg-gradient-to-br from-blue-600 to-blue-800 border-2 border-white/5'}`}
@@ -324,6 +465,32 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     </div>
                 )}
             </div>
+
+            {
+                (() => {
+                    const valueBetStatus = checkValueBet(
+                        displayStake,
+                        currentQuota,
+                        currentPlan.currentCapital,
+                        currentPlan.remainingWins,
+                        currentPlan.remainingEvents
+                    );
+
+                    if (!valueBetStatus) return null;
+
+                    return (
+                        <div className={`mb-4 px-4 py-3 rounded-lg border flex items-start gap-3 w-full ${valueBetStatus.status === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-200' : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-200'}`}>
+                            <div className={`p-1.5 rounded-full mt-0.5 shrink-0 animate-pulse ${valueBetStatus.status === 'critical' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                <AlertTriangle size={16} />
+                            </div>
+                            <div>
+                                <div className="font-bold text-sm uppercase tracking-wider mb-1 opacity-90">Attenzione: {valueBetStatus.status === 'critical' ? 'Rischio Critico' : 'Warning'}</div>
+                                <div className="text-xs font-medium leading-normal opacity-80">{valueBetStatus.message}</div>
+                            </div>
+                        </div>
+                    );
+                })()
+            }
 
             <div className="mb-6">
                 <button

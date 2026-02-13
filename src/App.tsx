@@ -5,8 +5,7 @@ import {
   RotateCcw,
   RefreshCw,
   LayoutDashboard,
-  BookOpen,
-  TrendingUp
+  BookOpen
 } from 'lucide-react';
 import { useMasaniello } from './hooks/useMasaniello';
 import Header from './components/Header';
@@ -60,6 +59,10 @@ const App = () => {
       id: 'stop_loss',
       label: `Stop-Loss Ciclo: Chiudi automaticamente se il capitale scende del ${config.stopLossPercentage}%`,
     },
+    {
+      id: 'trailing_profit_stop',
+      label: `Trailing Profit: Attiva a ${config.trailingProfitActivation || 30}% profit e chiudi se scende sotto ${config.trailingProfitLock || 10}%`,
+    },
   ];
 
   const [showConfig, setShowConfig] = useState(!currentPlan);
@@ -70,8 +73,7 @@ const App = () => {
     const isEnabled = activeRules.includes(ruleId);
     if (!currentPlan) return { active: false, enabled: isEnabled, isSuspended: false };
 
-    const suspendedRules = ['first_win', 'back_positive', 'profit_90', 'smart_auto_close'];
-    const isSuspended = currentPlan.isRescued && suspendedRules.includes(ruleId);
+    const isSuspended = false;
 
     const profitMade = currentPlan.currentCapital - currentPlan.startCapital;
     const profitThreshold = currentPlan.maxNetProfit * 0.9;
@@ -287,6 +289,7 @@ const App = () => {
             <div className="hidden lg:block lg:sticky lg:top-6 lg:self-start">
               {currentPlan && (
                 <ActivePlan
+                  initialCapital={config.initialCapital}
                   currentPlan={currentPlan}
                   isSequenceActive={isSequenceActive}
                   sequence={sequence}
@@ -299,6 +302,7 @@ const App = () => {
                   onBreakEven={handleBreakEven}
                   onAdjustment={handleAdjustment}
                   onActivateRescue={activateRescueMode}
+                  onEarlyClose={handleCloseCycle}
                   getNextStake={getNextStake}
                   getRescueSuggestion={getRescueSuggestion}
                 />
@@ -309,6 +313,7 @@ const App = () => {
           <div className="block lg:hidden mb-6">
             {currentPlan && (
               <ActivePlan
+                initialCapital={config.initialCapital}
                 currentPlan={currentPlan}
                 isSequenceActive={isSequenceActive}
                 sequence={sequence}
@@ -321,6 +326,7 @@ const App = () => {
                 onBreakEven={handleBreakEven}
                 onAdjustment={handleAdjustment}
                 onActivateRescue={activateRescueMode}
+                onEarlyClose={handleCloseCycle}
                 getNextStake={getNextStake}
                 getRescueSuggestion={getRescueSuggestion}
               />

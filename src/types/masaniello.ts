@@ -8,6 +8,8 @@ export interface Config {
   milestoneBankPercentage: number;
   stopLossPercentage: number;
   maxConsecutiveLosses?: number;
+  trailingProfitActivation?: number; // % of max profit to activate trailing
+  trailingProfitLock?: number; // % of profit to lock when trailing activated
 }
 
 export interface EventDetail {
