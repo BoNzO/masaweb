@@ -11,11 +11,32 @@ export const nCr = (n: number, k: number): number => {
     return res;
 };
 
-export const calculateMaxNetProfit = (startCapital: number, n: number, k: number, p: number): number => {
-    let denominator = 0;
-    for (let i = k; i <= n; i++) {
-        denominator += nCr(n, i) * Math.pow(p - 1, n - i);
-    }
-    const totalPayout = (startCapital * Math.pow(p, n)) / denominator;
+const masaMemo: Record<string, number> = {};
+
+/**
+ * Calculates the recursive denominator for Masaniello payout.
+ * Supports the "max consecutive losses" (m) condition.
+ */
+export const calculateMasaDenominator = (n: number, k: number, cl: number, m: number, q: number): number => {
+    if (m > 0 && cl > m) return 0;
+    if (n === 0) return k <= 0 ? 1 : 0;
+
+    const key = `${n}_${k}_${cl}_${m}_${q}`;
+    if (masaMemo[key] !== undefined) return masaMemo[key];
+
+    // Win path (cl resets to 0, k decreases)
+    const winPart = calculateMasaDenominator(n - 1, k - 1, 0, m, q);
+    // Loss path (cl increases, k stays same, result multiplied by Q-1)
+    const lossPart = (q - 1) * calculateMasaDenominator(n - 1, k, cl + 1, m, q);
+
+    const res = winPart + lossPart;
+    masaMemo[key] = res;
+    return res;
+};
+
+export const calculateMaxNetProfit = (startCapital: number, n: number, k: number, q: number, m: number = 0): number => {
+    const denominator = calculateMasaDenominator(n, k, 0, m, q);
+    if (denominator <= 0) return 0;
+    const totalPayout = (startCapital * Math.pow(q, n)) / denominator;
     return totalPayout - startCapital;
 };

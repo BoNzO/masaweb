@@ -27,6 +27,8 @@ interface ActivePlanProps {
     getRuleStatus: (id: string) => { active: boolean; enabled: boolean; isSuspended?: boolean };
     onFullBet: (isWin: boolean, customQuota?: number) => void;
     onPartialStep: (isWin: boolean, customQuota?: number) => void;
+    onBreakEven: () => void;
+    onAdjustment: (amount: number, isWinEquivalent: boolean) => void;
     onActivateRescue: (events: number, target?: number, wins?: number, extraCap?: number) => void;
     getNextStake: (quota?: number) => number;
     getRescueSuggestion: (extraCap?: number) => {
@@ -48,6 +50,8 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     getRuleStatus,
     onFullBet,
     onPartialStep,
+    onBreakEven,
+    onAdjustment,
     onActivateRescue,
     getNextStake,
     getRescueSuggestion,
@@ -244,6 +248,30 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                         <div className={`text-2xl font-medium ${stat.color} tracking-tight`}>{stat.value}</div>
                     </div>
                 ))}
+
+                {currentPlan.maxConsecutiveLosses && currentPlan.maxConsecutiveLosses > 0 ? (
+                    <div className="col-span-2 md:col-span-4 bg-gradient-to-r from-orange-500/5 to-red-500/5 border border-orange-500/10 rounded-xl p-3 flex justify-between items-center group">
+                        <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg bg-orange-900/20 text-orange-400 group-hover:scale-110 transition-transform ${currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses > 0 ? 'animate-pulse' : ''}`}>
+                                <AlertTriangle size={16} />
+                            </div>
+                            <div>
+                                <div className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Condizione: Max {currentPlan.maxConsecutiveLosses} Rossi</div>
+                                <div className="text-xs font-bold text-slate-200">
+                                    Strike Attuale: <span className={currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses >= currentPlan.maxConsecutiveLosses ? 'text-red-500' : 'text-orange-400'}>{currentPlan.currentConsecutiveLosses || 0}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex gap-1">
+                            {Array.from({ length: currentPlan.maxConsecutiveLosses }).map((_, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`w-2.5 h-2.5 rounded-full border ${idx < (currentPlan.currentConsecutiveLosses || 0) ? 'bg-red-500 border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-slate-700 border-slate-600'}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
             </div>
 
             <div
@@ -404,6 +432,56 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 )}
             </div>
 
+            <div className="mb-8 p-4 bg-slate-900/60 border border-slate-700/50 rounded-2xl relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity">
+                    <TrendingUp size={48} />
+                </div>
+                <h3 className="text-[10px] font-black text-indigo-400 border-b border-indigo-500/20 pb-2 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                    <HistoryIcon size={14} className="text-indigo-500" /> Trading Dashboard (PRO)
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <button
+                        onClick={onBreakEven}
+                        className="py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl text-[11px] font-black text-slate-300 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
+                    >
+                        <RefreshCw size={18} className="text-slate-500" />
+                        <div className="flex flex-col items-start leading-none">
+                            <span>BREAK EVEN</span>
+                            <span className="text-[8px] opacity-40 mt-1">€0.00 NET</span>
+                        </div>
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            const val = prompt("Inserisci il profitto NETTO realizzato (€):", "0.00");
+                            if (val !== null && val !== "") onAdjustment(Number(val), Number(val) > 0);
+                        }}
+                        className="py-3 bg-indigo-900/30 hover:bg-indigo-900/50 border border-indigo-500/30 rounded-xl text-[11px] font-black text-indigo-300 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
+                    >
+                        <TrendingUp size={18} className="text-indigo-400" />
+                        <div className="flex flex-col items-start leading-none">
+                            <span>PROFITTO PARZ.</span>
+                            <span className="text-[8px] opacity-40 mt-1">MANUAL +€</span>
+                        </div>
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            const val = prompt("Inserisci la perdita NETTA realizzata (€):", "0.00");
+                            if (val !== null && val !== "") onAdjustment(-Math.abs(Number(val)), false);
+                        }}
+                        className="py-3 bg-rose-900/30 hover:bg-rose-900/50 border border-rose-500/30 rounded-xl text-[11px] font-black text-rose-300 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
+                    >
+                        <TrendingDown size={18} className="text-rose-400" />
+                        <div className="flex flex-col items-start leading-none">
+                            <span>PERDITA PARZ.</span>
+                            <span className="text-[8px] opacity-40 mt-1">MANUAL -€</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
             <div className="bg-slate-900/40 rounded-xl border border-slate-700/50 overflow-hidden">
                 <div className="px-5 py-3 border-b border-slate-700/50 bg-slate-800/50 flex justify-between items-center">
                     <h3 className="font-bold text-[10px] uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
@@ -443,7 +521,12 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                         </div>
                                         <div>
                                             <div className="font-bold text-xs uppercase tracking-tight flex items-center gap-2">
-                                                {event.isVoid ? (
+                                                {event.message ? (
+                                                    <span className="text-blue-400 flex items-center gap-1">
+                                                        {event.isVoid ? <RefreshCw size={12} /> : event.isWin ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                                        {event.message}
+                                                    </span>
+                                                ) : event.isVoid ? (
                                                     <>
                                                         <AlertTriangle size={12} /> NULLO
                                                     </>
@@ -477,7 +560,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     ))}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 

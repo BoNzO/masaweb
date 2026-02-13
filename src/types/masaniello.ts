@@ -7,6 +7,7 @@ export interface Config {
   weeklyTargetPercentage: number;
   milestoneBankPercentage: number;
   stopLossPercentage: number;
+  maxConsecutiveLosses?: number;
 }
 
 export interface EventDetail {
@@ -54,6 +55,8 @@ export interface MasaPlan {
   generationNumber: number;
   milestonesBanked?: number;
   profitMilestoneReached?: number;
+  maxConsecutiveLosses?: number;
+  currentConsecutiveLosses?: number;
 }
 
 export interface ChartDataPoint {

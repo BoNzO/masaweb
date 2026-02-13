@@ -14,7 +14,8 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
         config.initialCapital,
         config.totalEvents,
         config.expectedWins,
-        config.quota
+        config.quota,
+        config.maxConsecutiveLosses || 0
     );
     const previewTarget = config.initialCapital + previewProfit;
     const previewROI = config.initialCapital > 0 ? (previewProfit / config.initialCapital) * 100 : 0;
@@ -132,6 +133,38 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
                             className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
                         />
                         <span className="font-bold w-16 text-right text-red-400">{config.stopLossPercentage}%</span>
+                    </div>
+                </div>
+
+                <div className="col-span-2 bg-slate-700/50 p-3 rounded border border-slate-500/20">
+                    <label className="block text-sm text-slate-300 mb-2 font-bold flex items-center gap-2 uppercase tracking-wider text-[10px]">
+                        <Settings size={14} /> Parametri Avanzati (Masaniello Condizionato)
+                    </label>
+                    <div className="flex flex-col gap-4">
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label className="text-xs text-slate-400 font-medium">Max Rossi Consecutivi (0 = Nessun limite)</label>
+                                <span className={`text-xs font-black ${config.maxConsecutiveLosses && config.maxConsecutiveLosses > 0 ? 'text-orange-400' : 'text-slate-500'}`}>
+                                    {config.maxConsecutiveLosses || 0}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="10"
+                                    step="1"
+                                    value={config.maxConsecutiveLosses || 0}
+                                    onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) })}
+                                    className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                                />
+                            </div>
+                            {config.maxConsecutiveLosses ? (config.maxConsecutiveLosses > 0 && (
+                                <p className="text-[10px] text-orange-400/70 mt-2 italic leading-tight">
+                                    Attenzione: Se si verificano {config.maxConsecutiveLosses + 1} rossi consecutivi, il piano fallirà istantaneamente.
+                                </p>
+                            )) : null}
+                        </div>
                     </div>
                 </div>
             </div>

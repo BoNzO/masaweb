@@ -1,4 +1,4 @@
-import { roundTwo, calculateMaxNetProfit } from './mathUtils';
+import { calculateMaxNetProfit, calculateMasaDenominator } from './mathUtils';
 
 export const calculateStake = (
     currentCapital: number,
@@ -6,48 +6,33 @@ export const calculateStake = (
     remainingWins: number,
     quota: number,
     targetCapital: number,
-    currentQuota?: number
+    maxLosses: number = 0,
+    currentCL: number = 0
 ): number => {
-    const q = Number(currentQuota || quota);
+    const q = Number(quota);
     const c = Number(currentCapital);
     const t = Number(targetCapital);
     const re = Math.floor(remainingEvents);
     const rw = Math.floor(remainingWins);
+    const m = Math.floor(maxLosses);
+    const cl = Math.floor(currentCL);
 
     if (rw <= 0 || re <= 0 || rw > re || q <= 1) return 0;
+    if (m > 0 && cl > m) return 0;
 
-    const memo: Record<string, number> = {};
-    const getRequired = (e: number, w: number): number => {
-        if (w <= 0) return t;
-        if (w > e) return Infinity;
-        const key = `${e}_${w}`;
-        if (memo[key] !== undefined) return memo[key];
+    const denNow = calculateMasaDenominator(re, rw, cl, m, q);
+    const reqNow = (t * denNow) / Math.pow(q, re);
 
-        const reqWin = getRequired(e - 1, w - 1);
-        const reqLoss = getRequired(e - 1, w);
+    if (reqNow <= 0) return 0;
 
-        if (reqWin === Infinity) return Infinity;
+    const denWin = calculateMasaDenominator(re - 1, rw - 1, 0, m, q);
+    const reqWin = (t * denWin) / Math.pow(q, re - 1);
 
-        if (reqLoss === Infinity) {
-            const res = reqWin / q;
-            memo[key] = res;
-            return res;
-        }
+    const denLoss = calculateMasaDenominator(re - 1, rw, cl + 1, m, q);
+    const reqLoss = (t * denLoss) / Math.pow(q, re - 1);
 
-        const res = (reqLoss * (q - 1) + reqWin) / q;
-        memo[key] = res;
-        return res;
-    };
-
-    const reqNow = getRequired(re, rw);
-    if (reqNow === Infinity || reqNow <= 0) return 0;
-
-    const reqWin = getRequired(re - 1, rw - 1);
-    const reqLoss = getRequired(re - 1, rw);
-    const lossVal = reqLoss === Infinity ? 0 : reqLoss;
-
-    const theoreticalStake = (reqWin - lossVal) / q;
     const scalingFactor = c / reqNow;
+    const theoreticalStake = (reqWin - reqLoss) / q;
     const stake = theoreticalStake * scalingFactor;
 
     return Math.max(0, Math.min(stake, c));
@@ -63,6 +48,7 @@ export const getRescueSuggestion = (
         remainingEvents: number;
         remainingWins: number;
         isRescued: boolean;
+        maxConsecutiveLosses?: number;
     } | null,
     extraCapital: number = 0
 ) => {
@@ -72,21 +58,21 @@ export const getRescueSuggestion = (
     const currentCap = Number(currentPlan.currentCapital);
     const effectiveCap = currentCap + Number(extraCapital);
     const quota = Number(currentPlan.quota);
+    const m = currentPlan.maxConsecutiveLosses || 0;
 
-    // The user wants a NEW configuration that doesn't exceed the original plan's duration
     const maxN = currentPlan.totalEvents;
 
-    // Trigger check
     const winsNeeded = currentPlan.remainingWins;
     const eventsLeft = currentPlan.remainingEvents;
     const errors = (currentPlan.totalEvents - currentPlan.expectedWins) - (currentPlan.remainingEvents - currentPlan.remainingWins);
     const totalAllowedErrors = currentPlan.totalEvents - currentPlan.expectedWins;
     const winsExhausted = currentPlan.remainingWins === 0 && currentCap < targetBE - 0.01;
 
-    const currentStake = calculateStake(currentCap, eventsLeft, winsNeeded, quota, targetBE);
+    // For rescue suggestion, we don't know the currentCL of the potential new plan (it's a reset)
+    // so we assume currentCL = 0 for the search.
+    const currentStake = calculateStake(currentCap, eventsLeft, winsNeeded, quota, targetBE, m, 0);
     const isStakeTooHigh = currentStake > currentCap * 0.20;
 
-    // Do not suggest if healthy or already at target
     if (currentCap >= targetBE - 0.05) return null;
     if (!winsExhausted && !isStakeTooHigh && errors < totalAllowedErrors * 0.7 && !currentPlan.isRescued) return null;
 
@@ -99,17 +85,14 @@ export const getRescueSuggestion = (
 
     let candidates: Candidate[] = [];
 
-    // Search for a new (N, K) configuration
-    // Optimization: N should be between 2 and maxN (original plan size)
     for (let nNew = 2; nNew <= maxN; nNew++) {
         for (let kNew = 1; kNew < nNew; kNew++) {
-            const potentialProfit = calculateMaxNetProfit(effectiveCap, nNew, kNew, quota);
+            const potentialProfit = calculateMaxNetProfit(effectiveCap, nNew, kNew, quota, m);
             if (effectiveCap + potentialProfit >= targetBE - 0.1) {
-                const stake = calculateStake(effectiveCap, nNew, kNew, quota, targetBE);
+                const stake = calculateStake(effectiveCap, nNew, kNew, quota, targetBE, m, 0);
                 if (stake > 0) {
                     candidates.push({ n: nNew, k: kNew, stake, ratio: stake / effectiveCap });
                 }
-                // Smallest K for this N found, move to next N
                 break;
             }
         }
@@ -117,19 +100,15 @@ export const getRescueSuggestion = (
 
     if (candidates.length === 0) return null;
 
-    // Filtration: prefer 5-15% stake
     let safeOnes = candidates.filter(c => c.ratio >= 0.04 && c.ratio <= 0.15);
 
     let best: Candidate;
     if (safeOnes.length > 0) {
-        // If multiple safe ones, pick the one with largest N (more flexible)
         best = safeOnes.sort((a, b) => b.n - a.n)[0];
     } else {
-        // Otherwise pick the one closest to a 10% stake
         best = candidates.sort((a, b) => Math.abs(a.ratio - 0.10) - Math.abs(b.ratio - 0.10))[0];
     }
 
-    // Now convert the new Plan (best.n, best.k) into "Additions" to the current remaining state
     const eToAdd = Math.max(0, best.n - eventsLeft);
     const wToAdd = Math.max(0, best.k - winsNeeded);
 

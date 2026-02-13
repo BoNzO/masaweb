@@ -101,6 +101,8 @@ export const useMasaniello = () => {
             isRescued: false,
             createdAt: new Date().toISOString(),
             generationNumber: currentPlan ? (currentPlan.generationNumber || 0) + 1 : 0,
+            maxConsecutiveLosses: config.maxConsecutiveLosses,
+            currentConsecutiveLosses: 0,
         };
     };
 
@@ -200,6 +202,8 @@ export const useMasaniello = () => {
             quota: planState.quota,
         };
 
+        const nextCL = isFullLoss ? (planState.currentConsecutiveLosses || 0) + 1 : (isVoid ? (planState.currentConsecutiveLosses || 0) : 0);
+
         const finalPlan: MasaPlan = {
             ...planState,
             events: [...planState.events, newEvent],
@@ -208,6 +212,7 @@ export const useMasaniello = () => {
             wins: nextTotalWins,
             losses: nextTotalLosses,
             wasNegative: wasNegativePersistent,
+            currentConsecutiveLosses: nextCL,
         };
 
         setSequence([]);
@@ -244,6 +249,14 @@ export const useMasaniello = () => {
             if (activeRules.includes('impossible') && (nextEventsLeft < nextWinsLeft || (nextEventsLeft === 0 && nextWinsLeft > 0))) {
                 finalPlan.status = 'failed';
                 finalPlan.triggeredRule = 'impossible';
+                setHistory([...history, finalPlan]);
+                setCurrentPlan(null);
+                return;
+            }
+
+            if (finalPlan.maxConsecutiveLosses && finalPlan.maxConsecutiveLosses > 0 && finalPlan.currentConsecutiveLosses && finalPlan.currentConsecutiveLosses > finalPlan.maxConsecutiveLosses) {
+                finalPlan.status = 'failed';
+                finalPlan.triggeredRule = 'max_losses';
                 setHistory([...history, finalPlan]);
                 setCurrentPlan(null);
                 return;
@@ -293,9 +306,10 @@ export const useMasaniello = () => {
             currentPlan.currentCapital,
             currentPlan.remainingEvents,
             currentPlan.remainingWins,
-            currentPlan.quota,
+            customQuota || currentPlan.quota,
             currentPlan.targetCapital,
-            customQuota
+            currentPlan.maxConsecutiveLosses || 0,
+            currentPlan.currentConsecutiveLosses || 0
         );
     };
 
@@ -331,6 +345,57 @@ export const useMasaniello = () => {
         finalizeSequence(fullSequence, tempPlan);
     };
 
+    const handleBreakEven = () => {
+        if (!currentPlan) return;
+        const beEvent: MasaEvent = {
+            id: currentPlan.events.filter((e) => !e.isSystemLog).length + 1,
+            stake: 0,
+            isWin: false,
+            isVoid: true,
+            isPartialSequence: false,
+            capitalAfter: currentPlan.currentCapital,
+            eventsLeft: currentPlan.remainingEvents,
+            winsLeft: currentPlan.remainingWins,
+            timestamp: new Date().toISOString(),
+            quota: currentPlan.quota,
+            message: 'BREAK EVEN'
+        };
+
+        setCurrentPlan({
+            ...currentPlan,
+            events: [...currentPlan.events, beEvent],
+        });
+    };
+
+    const handleAdjustment = (amount: number, isWinEquivalent: boolean) => {
+        if (!currentPlan) return;
+        const adjCapital = roundTwo(currentPlan.currentCapital + amount);
+        const adjEvent: MasaEvent = {
+            id: currentPlan.events.filter((e) => !e.isSystemLog).length + 1,
+            stake: Math.abs(amount),
+            isWin: isWinEquivalent,
+            isVoid: false,
+            isPartialSequence: false,
+            capitalAfter: adjCapital,
+            eventsLeft: currentPlan.remainingEvents - 1,
+            winsLeft: isWinEquivalent ? Math.max(0, currentPlan.remainingWins - 1) : currentPlan.remainingWins,
+            timestamp: new Date().toISOString(),
+            quota: currentPlan.quota,
+            message: amount >= 0 ? `USCITA PARZIALE (+€${amount})` : `PERDITA PARZIALE (-€${Math.abs(amount)})`
+        };
+
+        setCurrentPlan({
+            ...currentPlan,
+            currentCapital: adjCapital,
+            remainingEvents: currentPlan.remainingEvents - 1,
+            remainingWins: isWinEquivalent ? Math.max(0, currentPlan.remainingWins - 1) : currentPlan.remainingWins,
+            wins: isWinEquivalent ? currentPlan.wins + 1 : currentPlan.wins,
+            losses: isWinEquivalent ? currentPlan.losses : currentPlan.losses + 1,
+            events: [...currentPlan.events, adjEvent],
+            currentConsecutiveLosses: isWinEquivalent ? 0 : (currentPlan.currentConsecutiveLosses || 0) + 1
+        });
+    };
+
 
     const activateRescueMode = (eventsToAdd: number, customTarget?: number, winsToAdd: number = 0, extraCapital: number = 0) => {
         if (!currentPlan) return;
@@ -360,7 +425,8 @@ export const useMasaniello = () => {
                     newCapital,
                     currentPlan.remainingEvents + eventsToAdd,
                     currentPlan.remainingWins + winsToAdd,
-                    currentPlan.quota
+                    currentPlan.quota,
+                    currentPlan.maxConsecutiveLosses || 0
                 ))
         );
 
@@ -377,6 +443,7 @@ export const useMasaniello = () => {
             maxNetProfit: newProfit,
             isRescued: true,
             events: [...currentPlan.events, rescueEventLog],
+            currentConsecutiveLosses: 0, // Reset CL on rescue reset logic
         });
     };
 
@@ -401,6 +468,8 @@ export const useMasaniello = () => {
         startNewPlan,
         handleFullBet,
         handlePartialStep,
+        handleBreakEven,
+        handleAdjustment,
         activateRescueMode,
         resetAll,
         transitionToNextPlan,

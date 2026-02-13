@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { Settings, CheckCircle, RotateCcw, RefreshCw } from 'lucide-react';
+import {
+  Settings,
+  CheckCircle,
+  RotateCcw,
+  RefreshCw,
+  LayoutDashboard,
+  BookOpen,
+  TrendingUp
+} from 'lucide-react';
 import { useMasaniello } from './hooks/useMasaniello';
 import Header from './components/Header';
 import ConfigurationPanel from './components/ConfigurationPanel';
@@ -7,7 +15,9 @@ import StatsOverview from './components/StatsOverview';
 import ActivePlan from './components/ActivePlan';
 import AnalyticsSection from './components/AnalyticsSection';
 import HistoryLog from './components/HistoryLog';
+import TradingJournal from './components/TradingJournal';
 import { roundTwo } from './utils/mathUtils';
+import { calculatePerformance } from './utils/performanceUtils';
 import type { ChartDataPoint } from './types/masaniello';
 
 // RULES constant removed from top-level to be defined inside App for dynamic labels
@@ -25,6 +35,8 @@ const App = () => {
     startNewPlan,
     handleFullBet,
     handlePartialStep,
+    handleBreakEven,
+    handleAdjustment,
     activateRescueMode,
     resetAll,
     transitionToNextPlan,
@@ -52,6 +64,7 @@ const App = () => {
 
   const [showConfig, setShowConfig] = useState(!currentPlan);
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
+  const [view, setView] = useState<'dashboard' | 'journal'>('dashboard');
 
   const getRuleStatus = (ruleId: string) => {
     const isEnabled = activeRules.includes(ruleId);
@@ -205,111 +218,141 @@ const App = () => {
     transitionToNextPlan(currentPlan, 'manual_close', 'manual_close');
   };
 
+  const performanceStats = calculatePerformance(history, currentPlan);
+
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white min-h-screen">
+    <div className="w-full p-4 md:p-8 bg-gradient-to-br from-slate-900 to-slate-800 text-white min-h-screen">
       <Header />
 
-      <StatsOverview
-        totalWorth={stats.totalWorth}
-        startCapital={currentPlan ? currentPlan.startCapital : config.initialCapital}
-        absoluteStartCapital={stats.absoluteStartCapital}
-        totalProfit={stats.totalProfit}
-        totalGrowth={stats.totalGrowth}
-        totalBanked={stats.totalBanked}
-        totalWins={stats.totalWins}
-        totalLosses={stats.totalLosses}
-        estimatedDays={stats.estimatedDays}
-        expectedWinsTotal={stats.expectedWinsTotal}
-        evPerformance={stats.evPerformance}
-      />
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div className="space-y-6">
-          <AnalyticsSection
-            chartData={getChartData()}
-            heatmapData={getWeeklyHeatmapData()}
-            weeklyTarget={weeklyTarget}
-            weeklyTargetPercentage={config.weeklyTargetPercentage}
-          />
-
-          <div className="flex gap-3 mt-6 flex-wrap">
-            <button onClick={() => setShowConfig(!showConfig)} className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-              <Settings size={18} /> Config
-            </button>
-            {currentPlan && (
-              <>
-                <button onClick={handleCloseCycle} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                  <CheckCircle size={18} /> Chiudi Ciclo
-                </button>
-                <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors">
-                  <RotateCcw size={18} /> Reset Ciclo
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="hidden lg:block lg:sticky lg:top-6 lg:self-start">
-          {currentPlan && (
-            <ActivePlan
-              currentPlan={currentPlan}
-              isSequenceActive={isSequenceActive}
-              sequence={sequence}
-              activeRules={activeRules}
-              rules={RULES}
-              toggleRule={toggleRule}
-              getRuleStatus={getRuleStatus}
-              onFullBet={handleFullBet}
-              onPartialStep={handlePartialStep}
-              onActivateRescue={activateRescueMode}
-              getNextStake={getNextStake}
-              getRescueSuggestion={getRescueSuggestion}
-            />
-          )}
-        </div>
-      </div>
-
-      {showConfig && (
-        <ConfigurationPanel
-          config={config}
-          setConfig={setConfig}
-          onStart={() => {
-            startNewPlan();
-            setShowConfig(false);
-          }}
-        />
-      )}
-
-      <div className="block lg:hidden mb-6">
-        {currentPlan && (
-          <ActivePlan
-            currentPlan={currentPlan}
-            isSequenceActive={isSequenceActive}
-            sequence={sequence}
-            activeRules={activeRules}
-            rules={RULES}
-            toggleRule={toggleRule}
-            getRuleStatus={getRuleStatus}
-            onFullBet={handleFullBet}
-            onPartialStep={handlePartialStep}
-            onActivateRescue={activateRescueMode}
-            getNextStake={getNextStake}
-            getRescueSuggestion={getRescueSuggestion}
-          />
-        )}
-      </div>
-
-      <HistoryLog history={history} expandedHistory={expandedHistory} setExpandedHistory={setExpandedHistory} />
-
-      {!currentPlan && !showConfig && (
-        <div className="bg-slate-800 p-12 rounded-lg text-center border border-slate-700 border-dashed">
-          <RefreshCw size={48} className="mx-auto mb-4 text-slate-600 animate-spin-slow" />
-          <h3 className="text-xl font-bold mb-2">Nessun Piano Attivo</h3>
-          <p className="text-slate-400 mb-6">Configura i parametri per iniziare un nuovo ciclo</p>
-          <button onClick={() => setShowConfig(true)} className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold transition shadow-lg">
-            Configura Piano
+      {/* VIEW SELECTOR */}
+      <div className="flex justify-center mb-8">
+        <div className="bg-slate-800/50 p-1.5 rounded-2xl border border-slate-700/50 flex gap-1 shadow-2xl">
+          <button
+            onClick={() => setView('dashboard')}
+            className={`px-6 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all ${view === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <LayoutDashboard size={16} /> DASHBOARD
+          </button>
+          <button
+            onClick={() => setView('journal')}
+            className={`px-6 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all ${view === 'journal' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <BookOpen size={16} /> TRADING JOURNAL & PERFORMANCE
           </button>
         </div>
+      </div>
+
+      {view === 'dashboard' ? (
+        <>
+          <StatsOverview
+            totalWorth={stats.totalWorth}
+            startCapital={currentPlan ? currentPlan.startCapital : config.initialCapital}
+            absoluteStartCapital={stats.absoluteStartCapital}
+            totalProfit={stats.totalProfit}
+            totalGrowth={stats.totalGrowth}
+            totalBanked={stats.totalBanked}
+            totalWins={stats.totalWins}
+            totalLosses={stats.totalLosses}
+            estimatedDays={stats.estimatedDays}
+            expectedWinsTotal={stats.expectedWinsTotal}
+            evPerformance={stats.evPerformance}
+          />
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="space-y-6">
+              <AnalyticsSection
+                chartData={getChartData()}
+                heatmapData={getWeeklyHeatmapData()}
+                weeklyTarget={weeklyTarget}
+                weeklyTargetPercentage={config.weeklyTargetPercentage}
+              />
+
+              <div className="flex gap-3 mt-6 flex-wrap">
+                <button onClick={() => setShowConfig(!showConfig)} className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-xs font-bold">
+                  <Settings size={18} /> CONFIG
+                </button>
+                {currentPlan && (
+                  <>
+                    <button onClick={handleCloseCycle} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors text-xs font-bold">
+                      <CheckCircle size={18} /> CHIUDI CICLO
+                    </button>
+                    <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors text-xs font-bold">
+                      <RotateCcw size={18} /> RESET TOTALE
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="hidden lg:block lg:sticky lg:top-6 lg:self-start">
+              {currentPlan && (
+                <ActivePlan
+                  currentPlan={currentPlan}
+                  isSequenceActive={isSequenceActive}
+                  sequence={sequence}
+                  activeRules={activeRules}
+                  rules={RULES}
+                  toggleRule={toggleRule}
+                  getRuleStatus={getRuleStatus}
+                  onFullBet={handleFullBet}
+                  onPartialStep={handlePartialStep}
+                  onBreakEven={handleBreakEven}
+                  onAdjustment={handleAdjustment}
+                  onActivateRescue={activateRescueMode}
+                  getNextStake={getNextStake}
+                  getRescueSuggestion={getRescueSuggestion}
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="block lg:hidden mb-6">
+            {currentPlan && (
+              <ActivePlan
+                currentPlan={currentPlan}
+                isSequenceActive={isSequenceActive}
+                sequence={sequence}
+                activeRules={activeRules}
+                rules={RULES}
+                toggleRule={toggleRule}
+                getRuleStatus={getRuleStatus}
+                onFullBet={handleFullBet}
+                onPartialStep={handlePartialStep}
+                onBreakEven={handleBreakEven}
+                onAdjustment={handleAdjustment}
+                onActivateRescue={activateRescueMode}
+                getNextStake={getNextStake}
+                getRescueSuggestion={getRescueSuggestion}
+              />
+            )}
+          </div>
+
+          <HistoryLog history={history} expandedHistory={expandedHistory} setExpandedHistory={setExpandedHistory} />
+
+          {showConfig && (
+            <ConfigurationPanel
+              config={config}
+              setConfig={setConfig}
+              onStart={() => {
+                startNewPlan();
+                setShowConfig(false);
+              }}
+            />
+          )}
+
+          {!currentPlan && !showConfig && (
+            <div className="bg-slate-800 p-12 rounded-lg text-center border border-slate-700 border-dashed">
+              <RefreshCw size={48} className="mx-auto mb-4 text-slate-600 animate-spin-slow" />
+              <h3 className="text-xl font-bold mb-2">Nessun Piano Attivo</h3>
+              <p className="text-slate-400 mb-6">Configura i parametri per iniziare un nuovo ciclo</p>
+              <button onClick={() => setShowConfig(true)} className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold transition shadow-lg">
+                Configura Piano
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <TradingJournal stats={performanceStats} />
       )}
     </div>
   );
