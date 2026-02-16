@@ -8,8 +8,7 @@ export interface Config {
   milestoneBankPercentage: number;
   stopLossPercentage: number;
   maxConsecutiveLosses?: number;
-  trailingProfitActivation?: number; // % of max profit to activate trailing
-  trailingProfitLock?: number; // % of profit to lock when trailing activated
+
 }
 
 export interface EventDetail {
@@ -32,6 +31,18 @@ export interface MasaEvent {
   isSystemLog?: boolean;
   message?: string;
   quota?: number;
+  snapshot?: EventSnapshot;
+}
+
+export interface EventSnapshot {
+  config: Config;
+  activeRules: string[];
+  isRescued: boolean;
+  currentConsecutiveLosses: number;
+  maxConsecutiveLosses?: number;
+
+  suggestedStake?: number;
+  targetCapital?: number;
 }
 
 export interface MasaPlan {
@@ -55,10 +66,16 @@ export interface MasaPlan {
   isRescued: boolean;
   createdAt: string;
   generationNumber: number;
+  currentWeeklyTarget?: number;
   milestonesBanked?: number;
   profitMilestoneReached?: number;
   maxConsecutiveLosses?: number;
   currentConsecutiveLosses?: number;
+  // Tree Properties
+  parentId?: number | null;
+  childrenIds?: number[];
+  treeStatus?: 'active' | 'completed' | 'bankrupt' | 'merged';
+  tags?: string[];
 }
 
 export interface ChartDataPoint {

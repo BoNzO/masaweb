@@ -1,45 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     AlertTriangle,
     LifeBuoy,
-    Calendar,
-    Trophy,
     XCircle,
-    PiggyBank,
     RefreshCw,
     CheckCircle,
     ChevronDown,
     CheckSquare,
-    Square,
     History as HistoryIcon,
     TrendingUp,
     TrendingDown,
     ShieldAlert,
+    Shield,
+    Plus,
+    Minus,
+    Download
 } from 'lucide-react';
-import type { MasaPlan, EventDetail, Rule } from '../types/masaniello';
-// This part needs careful surgery.
-// First, adding import:
-import { getEarlyClosureSuggestion, checkValueBet } from '../utils/masaLogic';
-
-// Then fixing the JSX block around line 382/385.
-// The previous edit inserted a </div> and then an expression.
-// We need to remove the extra </div> and place the expression correctly.
-
+import { generateCSV, downloadCSV } from '../utils/exportUtils';
+import type { MasaPlan, Rule } from '../types/masaniello';
+import { getEarlyClosureSuggestion } from '../utils/masaLogic';
+import { calculateMaxNetProfit } from '../utils/mathUtils';
+import DebugRules from './DebugRules';
 
 interface ActivePlanProps {
-    initialCapital: number;
     currentPlan: MasaPlan;
-    isSequenceActive: boolean;
-    sequence: EventDetail[];
     activeRules: string[];
     rules: Rule[];
     toggleRule: (id: string) => void;
+    toggleAllRules: (ids: string[]) => void;
     getRuleStatus: (id: string) => { active: boolean; enabled: boolean; isSuspended?: boolean };
     onFullBet: (isWin: boolean, customQuota?: number) => void;
-    onPartialStep: (isWin: boolean, customQuota?: number) => void;
+    onPartialWin: (customQuota: number) => void;
+    onPartialLoss: (customQuota: number) => void;
     onBreakEven: () => void;
     onAdjustment: (amount: number, isWinEquivalent: boolean) => void;
-    onActivateRescue: (events: number, target?: number, wins?: number, extraCap?: number) => void;
+    onActivateRescue: (events: number, target?: number, wins?: number, extraCap?: number, maxLosses?: number) => void;
     onEarlyClose: () => void;
     getNextStake: (quota?: number) => number;
     getRescueSuggestion: (extraCap?: number) => {
@@ -49,484 +44,531 @@ interface ActivePlanProps {
         suggestedExtraCapital?: number;
         estimatedStake: number;
     } | null;
+    onUpdatePlan: (newPlan: MasaPlan) => void;
+    onUpdateStartCapital: (newAmount: number) => void;
+    config: any;
 }
 
 const ActivePlan: React.FC<ActivePlanProps> = ({
-    initialCapital,
     currentPlan,
-    isSequenceActive,
-    sequence,
     activeRules,
     rules,
     toggleRule,
+    toggleAllRules,
     getRuleStatus,
     onFullBet,
-    onPartialStep,
+    onPartialWin,
+    onPartialLoss,
     onBreakEven,
     onAdjustment,
     onActivateRescue,
     onEarlyClose,
     getNextStake,
     getRescueSuggestion,
+    onUpdateStartCapital,
+    config
 }) => {
     const [rescueEventsToAdd, setRescueEventsToAdd] = useState(2);
+    const [rescueWinsToAdd, setRescueWinsToAdd] = useState(0);
+    const [rescueMaxLosses, setRescueMaxLosses] = useState(currentPlan.maxConsecutiveLosses || 0);
+    const [showManualRescue, setShowManualRescue] = useState(false);
     const [rulesExpanded, setRulesExpanded] = useState(false);
     const [currentQuota, setCurrentQuota] = useState<number>(currentPlan.quota);
-    const [extraCap, setExtraCap] = useState(0);
 
-    const suggestion = getRescueSuggestion(extraCap);
-    const earlyClosure = getEarlyClosureSuggestion(currentPlan);
+    // Start Capital Editing
+    const [isEditingStart, setIsEditingStart] = useState(false);
+    const [tempStartCapital, setTempStartCapital] = useState(currentPlan.startCapital.toString());
+
+    const handleStartCapitalUpdate = () => {
+        const val = parseFloat(tempStartCapital);
+        if (!isNaN(val) && val > 0) {
+            onUpdateStartCapital(val);
+            setIsEditingStart(false);
+        }
+    };
+
+    const [rescueSuggestion, setRescueSuggestion] = useState<ReturnType<typeof getRescueSuggestion> | null>(null);
+    const [earlyClosure, setEarlyClosure] = useState<{ shouldClose: boolean; reason: string; profitSecure: number } | null>(null);
+
+    // Initial calculation
+    useEffect(() => {
+        // Check Rescue
+        const rescue = getRescueSuggestion(0);
+        setRescueSuggestion(rescue);
+
+        // Check Early Closure
+        const closure = getEarlyClosureSuggestion({ ...currentPlan, maxNetProfit: calculateMaxNetProfit(currentPlan.startCapital, currentPlan.totalEvents, currentPlan.expectedWins, currentPlan.quota, currentPlan.maxConsecutiveLosses || 0) });
+        setEarlyClosure(closure);
+    }, [currentPlan]);
 
     const eventsPlayed = currentPlan.totalEvents - currentPlan.remainingEvents;
-    const structuralWins = currentPlan.expectedWins - currentPlan.remainingWins;
     const structuralLosses = currentPlan.totalEvents - currentPlan.expectedWins - (currentPlan.remainingEvents - currentPlan.remainingWins);
+
+
     const totalAllowedErrors = currentPlan.totalEvents - currentPlan.expectedWins;
     const remainingAllowedErrors = totalAllowedErrors - structuralLosses;
     const tiltThreshold = Math.max(2, Math.ceil(remainingAllowedErrors * 0.3));
     const isCritical = structuralLosses >= totalAllowedErrors * 0.8 && totalAllowedErrors > 0;
     const isRescueNeededAfterWins = currentPlan.isRescued && currentPlan.remainingWins === 0 && currentPlan.currentCapital < currentPlan.startCapital - 0.01;
 
-    const partialBtnAmount = isSequenceActive ? sequence[0].stake : getNextStake(currentQuota) / 2;
-    const displayStake = isSequenceActive ? sequence[0].stake : getNextStake(currentQuota);
+    const displayStake = getNextStake(currentQuota);
+    const isZombieState = currentPlan.remainingWins <= 0 && currentPlan.currentCapital < currentPlan.targetCapital - 0.01 && currentPlan.status === 'active';
+
+    const isTargetReached = currentPlan.currentCapital >= currentPlan.targetCapital - 0.01;
+
+    // Failure Conditions
+    const isCapitalExhausted = currentPlan.currentCapital < 0.05 && structuralLosses >= totalAllowedErrors;
+    const isConsecutiveLimitReached = (currentPlan.maxConsecutiveLosses || 0) > 0 && (currentPlan.currentConsecutiveLosses || 0) > (currentPlan.maxConsecutiveLosses || 0);
+
+    const isFailed = isCapitalExhausted || isConsecutiveLimitReached;
 
     return (
-        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden">
-            <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 blur-[100px] pointer-events-none" />
-
-            {earlyClosure?.shouldClose && (
-                <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-emerald-600 to-green-700 text-white p-5 rounded-t-xl shadow-lg border-b border-emerald-500/30 animate-in slide-in-from-top-2">
-                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md shrink-0">
-                                <TrendingUp size={24} className="text-white" />
-                            </div>
-                            <div className="space-y-1">
-                                <div className="font-extrabold text-lg tracking-tight uppercase flex items-center gap-2">
-                                    Take Profit Intelligente <span className="bg-white/20 text-xs px-2 py-0.5 rounded font-bold">ALGORITMO</span>
-                                </div>
-                                <div className="text-xs text-emerald-100/90 leading-relaxed max-w-lg font-medium">
-                                    {earlyClosure.reason}
-                                </div>
-                            </div>
-                        </div>
-                        <button
-                            onClick={onEarlyClose}
-                            className="bg-white text-emerald-800 hover:bg-emerald-50 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all hover:scale-105 active:scale-95 whitespace-nowrap"
-                        >
-                            <CheckCircle size={16} /> Chiudi Ciclo & Massimizza (€{earlyClosure.profitSecure.toFixed(2)})
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses >= tiltThreshold && !currentPlan.isRescued && (
-                <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-5 rounded-t-xl shadow-lg border-b border-indigo-500/30 animate-in slide-in-from-top-2">
-                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-indigo-500/20 rounded-lg backdrop-blur-md shrink-0 border border-indigo-500/30">
-                                <ShieldAlert size={24} className="text-indigo-300" />
-                            </div>
-                            <div className="space-y-1">
-                                <div className="font-extrabold text-lg tracking-tight uppercase flex items-center gap-2 text-indigo-100">
-                                    Anti-Tilt Protection <span className="bg-indigo-500/30 text-[10px] px-2 py-0.5 rounded font-bold border border-indigo-400/30">STREAK NEGATIVA</span>
-                                </div>
-                                <div className="text-xs text-indigo-200/80 leading-relaxed max-w-lg font-medium">
-                                    Rilevati {currentPlan.currentConsecutiveLosses} loss consecutivi. L'algoritmo suggerisce di attivare la "Modalità Difensiva": estendi il piano di 1 evento per abbassare drasticamente la prossima puntata e recuperare lucidità.
-                                </div>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => onActivateRescue(1, currentPlan.targetCapital, 0, 0)}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/50 transition-all hover:scale-105 active:scale-95 whitespace-nowrap border border-indigo-400/20"
-                        >
-                            <LifeBuoy size={16} /> Abbassa Stake (Safety +1)
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {isCritical && !currentPlan.isRescued && (
-                <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-red-600 to-rose-700 text-white p-5 rounded-t-xl shadow-lg border-b border-red-500/30 animate-in slide-in-from-top-2">
-                    <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-6">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md shrink-0">
-                                <AlertTriangle size={24} className="text-yellow-300" />
-                            </div>
-                            <div className="space-y-1">
-                                <div className="font-extrabold text-lg tracking-tight uppercase">Soglia Critica / Rescue 2.0</div>
-                                <div className="text-xs text-red-100/90 leading-relaxed max-w-md">
-                                    Il sistema ha rilevato un rischio elevato. Puoi estendere la durata del piano o accettare il suggerimento algoritmico per tornare in break-even.
-                                </div>
-                            </div>
-                        </div>
-
-                        {suggestion ? (
-                            <div className="bg-blue-950/40 p-3 rounded-xl border border-blue-400/30 flex flex-col gap-2 min-w-[320px] shadow-2xl backdrop-blur-sm">
-                                <div className="flex justify-between items-center text-[10px] uppercase tracking-wider font-black text-blue-300">
-                                    <span className="flex items-center gap-1"><LifeBuoy size={12} /> Suggerimento Salvatore G. 2.0</span>
-                                    <span className="bg-yellow-400 text-blue-900 px-1.5 py-0.5 rounded">CONSIGLIATO</span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-2 py-1">
-                                    <div className="bg-slate-900/40 p-3 rounded-lg flex flex-col items-center">
-                                        <div className="text-[9px] uppercase font-bold text-slate-400 mb-1">Extra Capitale (€)</div>
-                                        <input
-                                            type="number"
-                                            className="w-20 bg-slate-800 border-none text-center font-bold text-white text-xs focus:ring-0"
-                                            value={extraCap}
-                                            onChange={(e) => setExtraCap(Number(e.target.value))}
-                                        />
-                                    </div>
-
-                                    <div className="bg-slate-900/40 p-3 rounded-lg flex flex-col items-center">
-                                        <div className="text-[9px] uppercase font-bold text-slate-400 mb-1">Nuovi Eventi</div>
-                                        <div className="text-sm font-black text-white">+{suggestion?.eventsToAdd}</div>
-                                    </div>
-                                    <div className="bg-slate-900/40 p-3 rounded-lg flex flex-col items-center">
-                                        <div className="text-[9px] uppercase font-bold text-slate-400 mb-1">Vittorie</div>
-                                        <div className="text-sm font-black text-white">+{suggestion?.winsToAdd}</div>
-                                    </div>
-                                    <div className="bg-slate-900/40 p-3 rounded-lg flex flex-col items-center">
-                                        <div className="text-[9px] uppercase font-bold text-slate-400 mb-1 text-green-400">Puntata</div>
-                                        <div className="text-sm font-black text-green-400">€{suggestion?.estimatedStake.toFixed(2)}</div>
-                                    </div>
-                                </div>
-
-                                <button
-                                    onClick={() => onActivateRescue(suggestion.eventsToAdd, suggestion.targetCapital, suggestion.winsToAdd, extraCap)}
-                                    className="w-full mt-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white font-black py-3 rounded-xl shadow-lg transition-all active:scale-95 text-xs uppercase tracking-widest flex items-center justify-center gap-2 group"
-                                >
-                                    APPLICA RECOVERY (BE)
-                                    <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="bg-black/20 p-3 rounded-lg border border-white/10 flex flex-col gap-2 min-w-[280px]">
-                                <div className="flex justify-between items-center text-xs uppercase tracking-wider font-semibold opacity-80">
-                                    <span>Target Attuale</span>
-                                    <span>€{currentPlan.targetCapital.toFixed(2)}</span>
-                                </div>
-                                <div className="h-px bg-white/10 my-1"></div>
-                                <div className="flex gap-2 items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-black uppercase opacity-60">Step:</span>
-                                        <select
-                                            value={rescueEventsToAdd}
-                                            onChange={(e) => setRescueEventsToAdd(Number(e.target.value))}
-                                            className="bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-md px-2 py-1 text-xs font-bold outline-none cursor-pointer transition-colors"
-                                        >
-                                            {[1, 2, 3, 4, 5, 8, 10].map((v) => (
-                                                <option key={v} value={v} className="bg-slate-800 text-white">
-                                                    +{v} Eventi
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <button
-                                        onClick={() => onActivateRescue(rescueEventsToAdd)}
-                                        className="bg-yellow-400 hover:bg-yellow-300 text-red-900 px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg hover:shadow-yellow-400/20 transition-all hover:scale-105"
-                                    >
-                                        <LifeBuoy size={16} /> Attiva
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {isRescueNeededAfterWins && (
-                <div className="relative mb-6 -mx-6 -mt-6 bg-gradient-to-r from-orange-600 to-amber-700 text-white p-5 rounded-t-xl shadow-lg border-b border-orange-500/30 animate-in slide-in-from-top-2">
-                    <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md">
-                                <AlertTriangle size={24} className="text-yellow-300" />
-                            </div>
-                            <div>
-                                <div className="font-extrabold text-lg tracking-tight uppercase">Vittorie Esaurite - Recupero Incompleto</div>
-                                <div className="text-sm text-orange-100/90 leading-tight">
-                                    Il Masa ha completato le vittorie previsto ma sei ancora in perdita. Estendi il piano per continuare il recupero.
-                                </div>
-                            </div>
-                        </div>
-                        <div className="bg-black/20 p-3 rounded-lg border border-white/10 flex flex-col gap-2 min-w-[280px]">
-                            <div className="flex gap-2 items-center justify-center">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-black uppercase opacity-60">Stake: €0.00</span>
-                                </div>
-                                <button
-                                    onClick={() => onActivateRescue(suggestion?.eventsToAdd || 2, suggestion?.targetCapital, suggestion?.winsToAdd || 1, extraCap)}
-                                    className="bg-white text-orange-800 px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all hover:scale-105"
-                                >
-                                    <LifeBuoy size={16} /> Estendi Recupero (+{suggestion?.winsToAdd || 1}V)
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {currentPlan.isRescued && (
-                <div className="absolute top-4 right-4 bg-orange-500/10 border border-orange-500/50 text-orange-400 px-3 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase flex items-center gap-2 animate-pulse z-20">
-                    <LifeBuoy size={14} /> Salvagente Attivo
-                </div>
-            )}
-
-            <div className="flex justify-between items-center mb-8 relative z-10">
-                <div>
-                    <h2 className="text-2xl font-black flex items-center gap-3 tracking-tighter">
-                        PIANO ATTIVO
-                        {currentPlan.isRescued && (
-                            <span className="text-[10px] bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded px-2 py-0.5 tracking-tighter font-bold">
-                                RESCUED
-                            </span>
-                        )}
-                    </h2>
-                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.2em] mt-0.5">Gestione Masa attiva</div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="text-xs px-3 py-2 bg-slate-900/50 rounded-lg border border-slate-700/50 font-bold text-blue-400 flex items-center gap-2">
-                        <Calendar size={14} /> {currentPlan.totalEvents}E / {currentPlan.expectedWins}V
-                    </div>
-                    <div className={`text-xs px-3 py-2 bg-slate-900/50 rounded-lg border border-slate-700/50 font-bold ${currentPlan.currentCapital < currentPlan.startCapital ? 'text-orange-400' : 'text-green-400'} flex items-center gap-2`}>
-                        <CheckCircle size={14} /> Target: €{currentPlan.targetCapital.toFixed(2)}
-                    </div>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 relative z-10">
-                {/* Capital Card */}
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 rounded-xl p-5 shadow-lg relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                        <PiggyBank size={48} className="text-white" />
-                    </div>
-                    <div className="flex justify-between items-start mb-2">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
-                            <PiggyBank size={14} className="text-blue-400" /> Capitale Attuale
-                        </span>
-                        {currentPlan.currentCapital >= initialCapital ? (
-                            <span className="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded font-black flex items-center gap-1">
-                                <TrendingUp size={10} /> +{(currentPlan.currentCapital - initialCapital).toFixed(2)}€
-                            </span>
-                        ) : (
-                            <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded font-black flex items-center gap-1">
-                                <TrendingDown size={10} /> {(currentPlan.currentCapital - initialCapital).toFixed(2)}€
-                            </span>
-                        )}
-                    </div>
-                    <div className="text-3xl font-black text-white tracking-tight mb-1">
-                        €{currentPlan.currentCapital.toFixed(2)}
-                    </div>
-                    <div className="w-full bg-slate-700/50 h-1.5 rounded-full overflow-hidden mt-2">
-                        <div
-                            className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-all duration-700"
-                            style={{ width: `${Math.min(100, (currentPlan.currentCapital / currentPlan.targetCapital) * 100)}%` }}
-                        />
-                    </div>
-                    <div className="text-[9px] text-slate-500 font-bold uppercase text-right mt-1">
-                        Target: €{currentPlan.targetCapital.toFixed(2)}
-                    </div>
-                </div>
-
-                {/* Progress Stats Grid */}
-                <div className="grid grid-cols-2 gap-3">
-                    {/* Events Progress */}
-                    <div className="bg-slate-800/50 border border-slate-700/30 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
-                        <div className="flex justify-between items-start z-10">
-                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
-                                <Calendar size={14} className="text-blue-400" /> Eventi
-                            </span>
-                            <span className="text-xs font-black text-white">{eventsPlayed}/{currentPlan.totalEvents}</span>
-                        </div>
-                        <div className="mt-3 relative z-10">
-                            <div className="w-full bg-slate-700/50 h-1.5 rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)] transition-all duration-700"
-                                    style={{ width: `${(eventsPlayed / currentPlan.totalEvents) * 100}%` }}
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Wins Progress */}
-                    <div className="bg-slate-800/50 border border-slate-700/30 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
-                        <div className="absolute inset-0 bg-green-500/5 opacity-0 hover:opacity-100 transition-opacity" />
-                        <div className="flex justify-between items-start z-10">
-                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-2">
-                                <Trophy size={14} className="text-green-400" /> Vittorie
-                            </span>
-                            <span className="text-xs font-black text-white">{structuralWins}/{currentPlan.expectedWins}</span>
-                        </div>
-                        <div className="mt-3 relative z-10">
-                            <div className="w-full bg-slate-700/50 h-1.5 rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] transition-all duration-700"
-                                    style={{ width: `${(structuralWins / currentPlan.expectedWins) * 100}%` }}
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Errors Margin */}
-                    <div className={`col-span-2 bg-slate-800/50 border ${isCritical ? 'border-red-500/40 bg-red-500/5' : 'border-slate-700/30'} rounded-xl p-3 flex items-center justify-between relative overflow-hidden transition-colors duration-500`}>
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${isCritical ? 'bg-red-500/20 text-red-500 animate-pulse' : 'bg-slate-700/50 text-slate-400'}`}>
-                                <XCircle size={16} />
-                            </div>
-                            <div>
-                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Margine Errori</div>
-                                <div className={`text-xs font-black ${isCritical ? 'text-red-400' : 'text-slate-300'}`}>
-                                    {structuralLosses} commessi <span className="text-slate-600 font-normal">/</span> {totalAllowedErrors} totali
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex gap-1">
-                            {Array.from({ length: totalAllowedErrors }).map((_, idx) => (
-                                <div
-                                    key={idx}
-                                    className={`w-1.5 h-6 rounded-full transition-all duration-500 ${idx < structuralLosses ? 'bg-red-500/80 shadow-[0_0_5px_rgba(239,68,68,0.5)]' : 'bg-slate-700/30'}`}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {currentPlan.maxConsecutiveLosses && currentPlan.maxConsecutiveLosses > 0 ? (
-                <div className="col-span-2 md:col-span-4 bg-gradient-to-r from-orange-500/5 to-red-500/5 border border-orange-500/10 rounded-xl p-3 flex justify-between items-center group">
-                    <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg bg-orange-900/20 text-orange-400 group-hover:scale-110 transition-transform ${currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses > 0 ? 'animate-pulse' : ''}`}>
-                            <AlertTriangle size={16} />
+        <div className="space-y-4">
+            {/* PLAN FAILED BANNER */}
+            {isFailed && (
+                <div className="bg-gradient-to-r from-red-950 to-black text-white p-6 rounded-xl shadow-2xl border-l-4 border-red-600 flex flex-col sm:flex-row items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-red-500/20 rounded-full ring-2 ring-red-500/50">
+                            <XCircle size={32} className="text-red-500" />
                         </div>
                         <div>
-                            <div className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Condizione: Max {currentPlan.maxConsecutiveLosses} Rossi</div>
-                            <div className="text-xs font-bold text-slate-200">
-                                Strike Attuale: <span className={currentPlan.currentConsecutiveLosses && currentPlan.currentConsecutiveLosses >= currentPlan.maxConsecutiveLosses ? 'text-red-500' : 'text-orange-400'}>{currentPlan.currentConsecutiveLosses || 0}</span>
+                            <div className="font-black text-lg uppercase tracking-wider text-red-100 mb-1">Masaniello Fallito</div>
+                            <div className="text-sm text-red-200/80 font-medium">
+                                {isConsecutiveLimitReached
+                                    ? "Limite di errori consecutivi superato. Il piano non è più sostenibile."
+                                    : "Capitale esaurito e scorta errori terminata."}
                             </div>
                         </div>
                     </div>
-                    <div className="flex gap-1">
-                        {Array.from({ length: currentPlan.maxConsecutiveLosses }).map((_, idx) => (
-                            <div
-                                key={idx}
-                                className={`w-2.5 h-2.5 rounded-full border ${idx < (currentPlan.currentConsecutiveLosses || 0) ? 'bg-red-500 border-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-slate-700 border-slate-600'}`}
-                            />
-                        ))}
-                    </div>
                 </div>
-            ) : null}
+            )}
 
-            <div
-                className={`p-4 rounded-2xl mb-5 shadow-2xl relative overflow-hidden transition-all duration-500 group ${isSequenceActive ? 'bg-gradient-to-br from-indigo-700 to-slate-900 border-2 border-indigo-500/30' : 'bg-gradient-to-br from-blue-600 to-blue-800 border-2 border-white/5'}`}
-            >
-                <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="relative z-10 flex items-center justify-between">
-                    <div className="text-xs text-white uppercase tracking-[0.2em] flex items-center gap-2 font-black">
-                        <RefreshCw size={14} className={isSequenceActive ? 'animate-spin-slow' : ''} />
-                        {isSequenceActive ? `Sequenza (Step ${sequence.length + 1}/2)` : 'Prossima Puntata'}
-                    </div>
-                    <div className="flex items-center gap-4">
-                        {!isSequenceActive && (
-                            <div className="flex flex-col items-end mr-4">
-                                <label className="text-[8px] uppercase font-black text-white/50 mb-1">Quota Giocata</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={currentQuota}
-                                    onChange={(e) => setCurrentQuota(Number(e.target.value))}
-                                    className="bg-white/10 text-white text-sm font-bold w-16 px-2 py-1 rounded border border-white/20 outline-none focus:border-white/50 transition-colors"
-                                />
-                            </div>
-                        )}
-                        <div className="flex items-baseline gap-1">
-                            <span className="text-lg font-medium text-white/50">€</span>
-                            <span className="text-3xl font-medium tracking-tighter text-white drop-shadow-lg">{displayStake.toFixed(2)}</span>
-                            {isSequenceActive && (
-                                <span className="text-[10px] bg-black/20 text-indigo-100 px-2 py-0.5 rounded-full ml-3 font-bold tracking-tight backdrop-blur-sm">
-                                    Quota 50%
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-                {isSequenceActive && (
-                    <div className="relative z-10 flex gap-1.5 mt-3 pt-3 border-t border-white/10">
-                        {sequence.map((step, idx) => (
-                            <div
-                                key={idx}
-                                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-bold tracking-wider border ${step.isWin ? 'bg-green-500/20 border-green-500/50 text-green-300' : 'bg-red-500/20 border-red-500/50 text-red-300'}`}
+            {/* ZOMBIE STATE WARNING */}
+            {isZombieState && (
+                <div className="bg-amber-900/40 border border-amber-500/50 p-4 rounded-xl flex items-start gap-3 animate-pulse">
+                    <LifeBuoy className="text-amber-400 shrink-0 mt-1" size={20} />
+                    <div>
+                        <h4 className="font-bold text-amber-200 text-sm mb-1">Obiettivo Vittorie Raggiunto</h4>
+                        <p className="text-amber-300/80 text-xs leading-relaxed mb-2">
+                            Hai completato le vittorie previste ma il capitale è ancora sotto soglia (possibile effetto di un Rescue precedente).
+                            Il sistema non può calcolare nuove puntate (Stake 0).
+                        </p>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-2">
+                            <span className="text-amber-300 text-xs font-bold">SOLUZIONE:</span>
+                            <button
+                                onClick={() => setShowManualRescue(true)}
+                                className="bg-amber-500 hover:bg-amber-400 text-amber-950 px-3 py-1.5 rounded-lg text-xs font-black uppercase shadow-lg flex items-center gap-2 transition-all cursor-pointer"
                             >
-                                {step.isWin ? <CheckCircle size={10} /> : <XCircle size={10} />}
-                                {idx + 1}°: {step.isWin ? 'V' : 'P'}
-                            </div>
-                        ))}
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-bold tracking-wider border border-white/10 bg-white/5 text-white/30 animate-pulse">
-                            2° STEP...
+                                <LifeBuoy size={14} />
+                                Usa Rescue Anti-Tilt
+                            </button>
                         </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
-            {
-                (() => {
-                    const valueBetStatus = checkValueBet(
-                        displayStake,
-                        currentQuota,
-                        currentPlan.currentCapital,
-                        currentPlan.remainingWins,
-                        currentPlan.remainingEvents
-                    );
+            {/* TARGET REACHED SUCCESS BANNER */}
+            {isTargetReached && (
+                <div className="bg-gradient-to-r from-emerald-900 to-green-900 text-white p-6 rounded-xl shadow-2xl border-l-4 border-emerald-400 flex flex-col sm:flex-row items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-emerald-500/20 rounded-full ring-2 ring-emerald-500/50">
+                            <CheckCircle size={32} className="text-emerald-300" />
+                        </div>
+                        <div>
+                            <div className="font-black text-lg uppercase tracking-wider text-emerald-100 mb-1">Target Raggiunto! 🏆</div>
+                            <div className="text-sm text-emerald-200/80 font-medium">
+                                Hai raggiunto l'obiettivo monetario del piano!
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={onEarlyClose}
+                        className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-emerald-950 px-8 py-3 rounded-xl text-sm font-black uppercase shadow-xl hover:shadow-emerald-500/20 transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
+                    >
+                        <CheckSquare size={18} />
+                        Chiudi Ciclo e Incassa
+                    </button>
+                </div>
+            )}
 
-                    if (!valueBetStatus) return null;
 
-                    return (
-                        <div className={`mb-4 px-4 py-3 rounded-lg border flex items-start gap-3 w-full ${valueBetStatus.status === 'critical' ? 'bg-red-500/10 border-red-500/30 text-red-200' : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-200'}`}>
-                            <div className={`p-1.5 rounded-full mt-0.5 shrink-0 animate-pulse ${valueBetStatus.status === 'critical' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                                <AlertTriangle size={16} />
+            {/* CONFIGURATION & STATUS */}
+            {!isTargetReached && ( // Hide config/rescue if target reached to focus on closure? No, maybe keep config visible but hide warnings.
+                // Actually user request was "Una volta raggiunto l'obiettivo questa finestra non dovrebbe uscire" referring to the alert.
+                // Let's keep the standard UI but conditionally render the Alert.
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* ... existing config cards ... */}
+                </div>
+            )}
+            {/* Note: I cannot see the Config Cards code in the snippet to wrap it.
+             I will just modify the Alert condition as requested.
+             */}
+
+
+            {/* Status Cards (Win/Loss/Events) - Assuming these are below, I will just proceed with the Alert modification in the next block or included here if possible. 
+               Wait, I see the loop. The snippet ends at 370.
+               I need to replace lines 117 to ... wait.
+               The snippet I read was 100-140 AND 330-370.
+               I don't have the contiguous block.
+               I should split this into two edits if strictness requires.
+               But I can probably do it if I define isTargetReached at the top and then conditionally render.
+               
+               Let's replace the `return (` block start to include `isTargetReached` logic.
+            */}
+
+
+            {/* 0. ALERTS STACK (MOVED TO TOP) */}
+            <div className="space-y-3 mb-6">
+                {/* Early Closure */}
+                {earlyClosure?.shouldClose && (
+                    <div className="bg-gradient-to-r from-emerald-600 to-green-700 text-white p-4 rounded-xl shadow-lg border-l-4 border-emerald-400 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-white/20 rounded-lg">
+                                <TrendingUp size={20} />
                             </div>
                             <div>
-                                <div className="font-bold text-sm uppercase tracking-wider mb-1 opacity-90">Attenzione: {valueBetStatus.status === 'critical' ? 'Rischio Critico' : 'Warning'}</div>
-                                <div className="text-xs font-medium leading-normal opacity-80">{valueBetStatus.message}</div>
+                                <div className="font-black text-sm uppercase tracking-wider">Take Profit</div>
+                                <div className="text-xs text-emerald-100 opacity-90">{earlyClosure.reason}</div>
                             </div>
                         </div>
-                    );
-                })()
-            }
+                        <button onClick={onEarlyClose} className="bg-white text-emerald-800 px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md hover:bg-emerald-50 transition-colors">
+                            Chiudi (€{earlyClosure.profitSecure.toFixed(2)})
+                        </button>
+                    </div>
+                )}
 
-            <div className="mb-6">
+                {/* Rescue / Critical Logic */}
+                {(() => {
+                    const isCriticalVisible = !isTargetReached && (showManualRescue || ((isCritical || isRescueNeededAfterWins) && !currentPlan.isRescued));
+
+                    return (
+                        <>
+                            {/* Rescue / Critical */}
+                            {isCriticalVisible && (
+                                <div className="bg-gradient-to-r from-red-900 to-rose-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-red-500 flex flex-col gap-4 animate-in slide-in-from-top-2">
+                                    <div className="flex justify-between items-start">
+                                        <div className="flex items-start gap-3">
+                                            <div className="p-2 bg-red-500/20 rounded-lg">
+                                                <AlertTriangle size={20} className="text-red-300" />
+                                            </div>
+                                            <div>
+                                                <div className="font-black text-sm uppercase tracking-wider text-red-100">Rescue: Soglia Critica</div>
+                                                <div className="text-xs text-red-200 opacity-80 max-w-sm">
+                                                    Rischio elevato. Consigliato intervento per correggere il tiro.
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {/* Actions Right Side */}
+                                        <div className="flex gap-2">
+                                            {rescueSuggestion && (
+                                                <button onClick={() => onActivateRescue(rescueSuggestion.eventsToAdd, rescueSuggestion.targetCapital, rescueSuggestion.winsToAdd, 0)} className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border border-red-400/30">
+                                                    Rescue Auto (+{rescueSuggestion.winsToAdd}V)
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => setShowManualRescue(!showManualRescue)}
+                                                className={`bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border ${showManualRescue ? 'border-indigo-500 text-indigo-300' : 'border-slate-600'}`}
+                                            >
+                                                {showManualRescue ? 'Chiudi Manuale' : 'Manuale...'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Manual Rescue Expandable Area */}
+                                    {showManualRescue && (
+                                        <div className="bg-black/20 rounded-lg p-4 border border-white/10 animate-in fade-in slide-in-from-top-1 space-y-4">
+
+                                            {/* 1. SELECTORS */}
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                {/* Events Selector */}
+                                                <div>
+                                                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
+                                                        <LifeBuoy size={12} /> Aggiungi Eventi:
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {[1, 2, 3, 4, 5, 6, 8, 10].map((num) => (
+                                                            <button
+                                                                key={num}
+                                                                onClick={() => setRescueEventsToAdd(num)}
+                                                                className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueEventsToAdd === num ? 'bg-white text-rose-900 scale-110 shadow-lg ring-2 ring-rose-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                                            >
+                                                                +{num}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* Wins Selector */}
+                                                <div>
+                                                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
+                                                        <TrendingUp size={12} /> Aggiungi Vittorie:
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {[0, 1, 2, 3, 4, 5].map((num) => (
+                                                            <button
+                                                                key={num}
+                                                                onClick={() => setRescueWinsToAdd(num)}
+                                                                className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueWinsToAdd === num ? 'bg-emerald-400 text-emerald-950 scale-110 shadow-lg ring-2 ring-emerald-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                                            >
+                                                                +{num}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* Max Losses Selector */}
+                                                <div>
+                                                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
+                                                        <ShieldAlert size={12} /> Max Loss (M):
+                                                    </div>
+                                                    <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-lg border border-slate-700/50">
+                                                        <button
+                                                            onClick={() => setRescueMaxLosses(Math.max(0, rescueMaxLosses - 1))}
+                                                            className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
+                                                        >
+                                                            -
+                                                        </button>
+                                                        <span className={`text-xs font-bold w-full text-center ${rescueMaxLosses === 0 ? 'text-slate-500' : 'text-orange-400'}`}>
+                                                            {rescueMaxLosses === 0 ? '∞' : rescueMaxLosses}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => setRescueMaxLosses(rescueMaxLosses + 1)}
+                                                            className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
+                                                        >
+                                                            +
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* 2. PROJECTION PANEL */}
+                                            {(() => {
+                                                // Real-time Projection Calculation
+                                                const newTotalEvents = currentPlan.remainingEvents + rescueEventsToAdd;
+                                                const newTotalWins = currentPlan.remainingWins + rescueWinsToAdd;
+
+                                                // Calculate new Max Profit based on Current Capital 
+                                                const projectedMaxProfit = calculateMaxNetProfit(
+                                                    currentPlan.currentCapital,
+                                                    newTotalEvents,
+                                                    newTotalWins,
+                                                    currentPlan.quota,
+                                                    rescueMaxLosses
+                                                );
+
+                                                const projectedTarget = currentPlan.currentCapital + projectedMaxProfit;
+
+                                                return (
+                                                    <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/50 flex flex-col gap-2">
+                                                        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                                                            <div className="flex gap-4 text-center sm:text-left">
+                                                                <div>
+                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Target</div>
+                                                                    <div className="text-sm font-black text-blue-300">€{projectedTarget.toFixed(2)}</div>
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Utile</div>
+                                                                    <div className="text-sm font-black text-emerald-400">+€{projectedMaxProfit.toFixed(2)}</div>
+                                                                </div>
+                                                                <div className="hidden sm:block">
+                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Configurazione</div>
+                                                                    <div className="text-xs font-bold text-slate-300">
+                                                                        {currentPlan.expectedWins + rescueWinsToAdd}/{currentPlan.totalEvents + rescueEventsToAdd} @ {currentPlan.quota}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <button
+                                                                onClick={() => {
+                                                                    onActivateRescue(rescueEventsToAdd, projectedTarget, rescueWinsToAdd, 0, rescueMaxLosses);
+                                                                    setShowManualRescue(false);
+                                                                }}
+                                                                className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-xs font-black uppercase tracking-wider shadow-lg transition-all active:scale-95"
+                                                            >
+                                                                Applica Modifiche
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Anti-Tilt (Only if Critical is NOT visible) */}
+                            {!isCriticalVisible && (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold && !currentPlan.isRescued && (
+                                <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-indigo-500 flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div className="flex items-start gap-3">
+                                        <div className="p-2 bg-indigo-500/20 rounded-lg">
+                                            <ShieldAlert size={20} className="text-indigo-300" />
+                                        </div>
+                                        <div>
+                                            <div className="font-black text-sm uppercase tracking-wider text-indigo-100 flex items-center gap-2">
+                                                Rescue: Anti-Tilt
+                                                <button
+                                                    onClick={() => alert(`Rescue (Anti-Tilt):\n\nIl motore "Rescue" ha rilevato ${currentPlan.currentConsecutiveLosses} sconfitte consecutive, attivando la protezione Anti-Tilt.\n\nTi suggeriamo di applicare un "Rescue Rapido" (+1 Evento). Questa azione estende il piano mantenendo il target invariato, abbattendo drasticamente lo stake necessario e riducendo la pressione psicologica.`)}
+                                                    className="bg-indigo-800/50 hover:bg-indigo-700/50 rounded-full w-4 h-4 flex items-center justify-center text-[10px] text-indigo-200"
+                                                >
+                                                    ?
+                                                </button>
+                                            </div>
+                                            <div className="text-xs text-indigo-200 opacity-80 max-w-sm">
+                                                {currentPlan.currentConsecutiveLosses} loss consecutivi. Attiva il Rescue Rapido.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        <button onClick={() => setShowManualRescue(true)} className="bg-slate-800 hover:bg-slate-700 text-indigo-200 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-md border border-indigo-500/30 transition-colors">
+                                            Usa Rescue Anti-Tilt
+                                        </button>
+                                        <button onClick={() => onActivateRescue(1, currentPlan.targetCapital, 0, 0)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md transition-colors">
+                                            Rescue Rapido (+1)
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    );
+                })()}
+
+            </div>
+
+
+            {/* 1. TOP SECTION: Header & Stats */}
+            <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden group">
+                <div className="absolute -top-32 -right-32 w-64 h-64 bg-blue-500/10 blur-[80px] group-hover:bg-blue-500/20 transition-all duration-700 pointer-events-none" />
+
+                {/* Header Title */}
+                <div className="flex justify-between items-center mb-6 relative z-10">
+                    <div>
+                        <h2 className="text-xl font-black flex items-center gap-3 tracking-tight text-white">
+                            PIANO ATTIVO
+                            {currentPlan.isRescued && (
+                                <span className="text-[10px] bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-md px-2 py-0.5 font-bold tracking-wide uppercase flex items-center gap-1">
+                                    <LifeBuoy size={10} /> Rescued
+                                </span>
+                            )}
+                        </h2>
+                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Gestione Masa attiva</div>
+                    </div>
+                    {/* Status Badge */}
+                    <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${currentPlan.currentCapital >= currentPlan.startCapital
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        }`}>
+                        {currentPlan.currentCapital >= currentPlan.startCapital ? 'Profit' : 'Drawdown'}
+                    </div>
+                </div>
+
+                {/* Main Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
+                    {/* Start Capital */}
+                    <div className="bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-slate-600/50 transition-colors group/start">
+                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1 flex justify-between items-center">
+                            Capitale Iniziale
+                            {!isEditingStart && <div className="opacity-0 group-hover/start:opacity-100 transition-opacity text-[9px] text-blue-400 cursor-pointer" onClick={() => { setTempStartCapital(currentPlan.startCapital.toString()); setIsEditingStart(true); }}>MODIFICA</div>}
+                        </div>
+
+                        {isEditingStart ? (
+                            <div className="flex items-center gap-2">
+                                <span className="text-slate-400 text-sm">€</span>
+                                <input
+                                    type="number"
+                                    value={tempStartCapital}
+                                    onChange={(e) => setTempStartCapital(e.target.value)}
+                                    className="w-20 bg-slate-800 text-white font-bold text-sm px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-blue-500"
+                                    autoFocus
+                                />
+                                <button onClick={handleStartCapitalUpdate} className="text-emerald-400 hover:bg-emerald-500/10 p-1 rounded transition-colors"><CheckCircle size={14} /></button>
+                                <button onClick={() => setIsEditingStart(false)} className="text-rose-400 hover:bg-rose-500/10 p-1 rounded transition-colors"><XCircle size={14} /></button>
+                            </div>
+                        ) : (
+                            <div className="text-xl font-bold text-slate-300 cursor-pointer hover:text-blue-300 transition-colors" onClick={() => { setTempStartCapital(currentPlan.startCapital.toString()); setIsEditingStart(true); }}>
+                                €{currentPlan.startCapital.toFixed(2)}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Current Capital (HERO) */}
+                    <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-4 border border-slate-600 shadow-lg md:scale-105 flex flex-col justify-between relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-3 opacity-10">
+                            {currentPlan.currentCapital >= currentPlan.startCapital ? <TrendingUp size={48} /> : <TrendingDown size={48} />}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex justify-between items-center">
+                            Capitale Attuale
+                            <span className={`text-[10px] font-black ${currentPlan.currentCapital >= currentPlan.startCapital ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? '+' : ''}€{(currentPlan.currentCapital - currentPlan.startCapital).toFixed(2)}
+                            </span>
+                        </div>
+                        <div className="text-xl font-bold tracking-tight text-[#F84AA7]">
+                            €{currentPlan.currentCapital.toFixed(2)}
+                        </div>
+                    </div>
+
+                    {/* Target Capital */}
+                    <div className="bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-blue-500/20 transition-colors group/target">
+                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1 group-hover/target:text-blue-400 transition-colors">Target Finale</div>
+                        <div className="text-xl font-bold text-blue-400 group-hover/target:text-blue-300 transition-colors">€{currentPlan.targetCapital.toFixed(2)}</div>
+                    </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="mt-6 relative z-10">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                        <span>Progresso</span>
+                        <span>{Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100)).toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700/30">
+                        <div
+                            className={`h-full transition-all duration-1000 ease-out ${currentPlan.currentCapital >= currentPlan.startCapital ? 'bg-gradient-to-r from-blue-500 to-emerald-400' : 'bg-rose-500'}`}
+                            style={{ width: `${Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100))}%` }}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            {/* 5. RULES (Collapsible) - MOVED HERE */}
+            <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-4">
                 <button
                     onClick={() => setRulesExpanded(!rulesExpanded)}
-                    className="w-full flex items-center justify-between px-5 py-3.5 bg-slate-900/40 hover:bg-slate-900/60 border border-slate-700/50 rounded-xl transition-all group"
+                    className="w-full flex items-center justify-between px-5 py-4 bg-slate-800 hover:bg-slate-750 transition-colors"
                 >
                     <div className="flex items-center gap-3">
-                        <div className={`p-1.5 rounded-lg ${rulesExpanded ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-500'}`}>
+                        <div className="p-1.5 rounded-lg bg-slate-700 text-slate-400">
                             <CheckCircle size={14} />
                         </div>
-                        <span className="font-bold text-xs text-slate-300">
-                            Regole Automatiche Attive: <span className="text-white ml-1">{activeRules.length}</span>
+                        <span className="font-bold text-xs text-slate-300 uppercase tracking-wider">
+                            Regole Attive ({activeRules.length})
                         </span>
                     </div>
-                    <ChevronDown size={16} className={`text-slate-500 group-hover:text-slate-300 transition-transform duration-300 ${rulesExpanded ? 'rotate-180' : ''}`} />
+                    <ChevronDown size={16} className={`text-slate-500 transition-transform ${rulesExpanded ? 'rotate-180' : ''}`} />
                 </button>
                 {rulesExpanded && (
-                    <div className="mt-2 p-4 bg-slate-900/60 border border-slate-700/50 rounded-xl space-y-3 animate-in fade-in zoom-in-95">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className="px-5 pb-5 pt-0 border-t border-slate-700/50">
+                        <div className="flex justify-end mt-2">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleAllRules(rules.map(r => r.id));
+                                }}
+                                className="text-[10px] uppercase font-bold text-slate-500 hover:text-white transition-colors"
+                            >
+                                {activeRules.length === rules.length ? 'Disattiva Tutti' : 'Attiva Tutti'}
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                             {rules.map((rule) => {
                                 const status = getRuleStatus(rule.id);
                                 return (
                                     <div
                                         key={rule.id}
                                         onClick={() => toggleRule(rule.id)}
-                                        className={`px-3 py-2 rounded-lg text-[10px] flex items-center justify-between cursor-pointer border transition-all ${status.isSuspended ? 'bg-orange-500/5 border-orange-500/20 opacity-80' : status.enabled ? 'bg-slate-800 border-slate-600 text-slate-200 hover:border-slate-500 shadow-sm' : 'bg-slate-900/30 border-slate-800 text-slate-600 opacity-40 hover:opacity-100 hover:bg-slate-900/50'}`}
+                                        className={`px-3 py-2 rounded-lg text-[10px] flex items-center justify-between cursor-pointer border transition-all ${status.isSuspended ? 'bg-orange-500/5 border-orange-500/20 opacity-80' : status.enabled ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-800/50 border-slate-700 text-slate-500 opacity-50'}`}
                                     >
-                                        <div className="flex items-center gap-3">
-                                            <div className={`transition-all ${status.enabled ? 'scale-110 text-green-500' : 'scale-100 text-slate-700'}`}>
-                                                {status.enabled ? <CheckSquare size={14} /> : <Square size={14} />}
-                                            </div>
-                                            <span className={`font-medium ${!status.enabled ? 'line-through opacity-50' : ''}`}>{rule.label}</span>
-                                        </div>
-                                        {status.isSuspended && (
-                                            <span className="shrink-0 bg-orange-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded leading-none">SOSPESA</span>
-                                        )}
+                                        <span className="font-bold">{rule.label}</span>
+                                        {status.enabled && <CheckSquare size={12} className="text-green-500" />}
                                     </div>
                                 );
                             })}
@@ -535,199 +577,239 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-6">
-                {!isSequenceActive ? (
-                    <>
-                        <button
-                            onClick={() => onFullBet(true, currentQuota)}
-                            className="group relative overflow-hidden py-4 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-green-800 active:border-b-0"
-                        >
-                            <div className="flex flex-col items-center">
-                                <span className="flex items-center gap-2"><CheckCircle size={18} /> VINTA</span>
-                                <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold">100% TARGET</span>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => onPartialStep(true, currentQuota)}
-                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98]"
-                        >
-                            <div className="flex flex-col items-center">
-                                <span className="flex items-center gap-2 text-green-400"><TrendingUp size={18} /> PARZIALE</span>
-                                <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">€{partialBtnAmount.toFixed(2)} (50%)</span>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => onFullBet(false, currentQuota)}
-                            className="group relative overflow-hidden py-4 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-red-900 active:border-b-0"
-                        >
-                            <div className="flex flex-col items-center text-white">
-                                <span className="flex items-center gap-2"><XCircle size={18} /> PERSA</span>
-                                <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">Fallimento totale</span>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => onPartialStep(false, currentQuota)}
-                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98]"
-                        >
-                            <div className="flex flex-col items-center">
-                                <span className="flex items-center gap-1.5 text-red-500"><TrendingDown size={18} /> PARZIALE</span>
-                                <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">€{partialBtnAmount.toFixed(2)} (50%)</span>
-                            </div>
-                        </button>
-                    </>
-                ) : (
-                    <>
-                        <button
-                            onClick={() => onPartialStep(true)}
-                            className="col-span-1 group relative overflow-hidden py-6 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-xl shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-green-800 active:border-b-0"
-                        >
-                            <div className="flex flex-col items-center">
-                                <span className="flex items-center gap-3"><Trophy size={24} /> 2° VINTA</span>
-                                <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold">CHIUDI SEQUENZA</span>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => onPartialStep(false)}
-                            className="col-span-1 group relative overflow-hidden py-6 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-xl shadow-xl transition-all hover:scale-[1.03] active:scale-[0.98] border-b-4 border-red-900 active:border-b-0"
-                        >
-                            <div className="flex flex-col items-center text-white">
-                                <span className="flex items-center gap-3"><XCircle size={24} /> 2° PERSA</span>
-                                <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">PERDE ENTRAMBI</span>
-                            </div>
-                        </button>
-                    </>
+            {/* 2. STATS & CONDIZIONI GRID */}
+            <div className={`grid grid-cols-1 sm:grid-cols-3 ${((currentPlan.maxConsecutiveLosses || 0) > 0) ? 'lg:grid-cols-4' : ''} gap-4 relative z-10 mb-6`}>
+
+                {/* Events */}
+                <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Eventi</div>
+                    <div className="text-lg font-black text-white">{eventsPlayed} <span className="text-xs text-slate-500 font-medium">/ {currentPlan.totalEvents}</span></div>
+                    <div className="w-full h-1 bg-slate-700 rounded-full mt-2 overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: `${(eventsPlayed / currentPlan.totalEvents) * 100}%` }} />
+                    </div>
+                </div>
+
+                {/* Wins */}
+                <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Vittorie</div>
+                    <div className="text-lg font-black text-emerald-400">
+                        {currentPlan.expectedWins - currentPlan.remainingWins} <span className="text-xs text-slate-500 font-medium">/ {currentPlan.expectedWins}</span>
+                    </div>
+                    <div className="w-full h-1 bg-slate-700 rounded-full mt-2 overflow-hidden">
+                        <div className="h-full bg-emerald-500" style={{ width: `${((currentPlan.expectedWins - currentPlan.remainingWins) / currentPlan.expectedWins) * 100}%` }} />
+                    </div>
+                </div>
+
+                {/* Errors */}
+                <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Errori</div>
+                    <div className="text-lg font-black text-rose-500">
+                        {structuralLosses} <span className="text-xs text-slate-500 font-medium">/ {totalAllowedErrors}</span>
+                    </div>
+                    <div className="w-full h-1 bg-slate-700 rounded-full mt-2 overflow-hidden">
+                        <div className={`h-full ${isCritical ? 'bg-red-500' : 'bg-orange-400'}`} style={{ width: `${(structuralLosses / totalAllowedErrors) * 100}%` }} />
+                    </div>
+                </div>
+
+                {/* Consecutive Errors (Conditional 4th Column) */}
+                {(currentPlan.maxConsecutiveLosses || 0) > 0 && (
+                    <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 flex flex-col justify-between">
+
+                        <div className="flex justify-between items-start mb-1">
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Max Rossi</div>
+                            {(currentPlan.currentConsecutiveLosses || 0) > 0 && (
+                                <AlertTriangle size={10} className="text-orange-400 animate-pulse" />
+                            )}
+                        </div>
+
+                        <div className={`text-lg font-black ${(currentPlan.currentConsecutiveLosses || 0) >= (currentPlan.maxConsecutiveLosses || 0) ? 'text-red-500' : 'text-orange-400'}`}>
+                            {currentPlan.currentConsecutiveLosses || 0} <span className="text-xs text-slate-500 font-medium">/ {currentPlan.maxConsecutiveLosses}</span>
+                        </div>
+
+                        {/* Dots visualizer - aligned with progress bars */}
+                        <div className="flex gap-1 mt-2.5 items-center h-1">
+                            {Array.from({ length: currentPlan.maxConsecutiveLosses || 0 }).map((_, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`flex-1 h-1 rounded-full ${idx < (currentPlan.currentConsecutiveLosses || 0)
+                                        ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]'
+                                        : 'bg-slate-700'
+                                        }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
                 )}
             </div>
 
-            <div className="mb-8 p-4 bg-slate-900/60 border border-slate-700/50 rounded-2xl relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-2 opacity-5 group-hover:opacity-10 transition-opacity">
-                    <TrendingUp size={48} />
+            {/* 3. ALERTS STACK (Anti-Tilt, Smart Breath, Rescue, Early Closure) */}
+
+
+
+
+            {/* 4. BET & ACTIONS CONTAINER (Side-by-side) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                {/* LEFT: NEXT BET CARD */}
+                <div
+                    className="p-6 rounded-2xl shadow-2xl relative overflow-hidden transition-all duration-500 group bg-gradient-to-br from-blue-600 to-blue-800 border-2 border-white/10 flex flex-col justify-center"
+                >
+                    <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="flex items-center justify-between relative z-10">
+                        <div className="space-y-1">
+                            <div className="text-xs text-blue-100/70 font-bold uppercase tracking-widest flex items-center gap-2">
+                                <RefreshCw size={12} />
+                                Prossimo Step
+                            </div>
+                            <h3 className="text-3xl font-black text-white tracking-tight">
+                                Puntata
+                            </h3>
+                        </div>
+
+                        <div className="flex flex-col items-end">
+                            <div className="flex items-center gap-2 mb-2 bg-black/20 px-3 py-1.5 rounded-lg border border-white/10">
+                                <span className="text-[10px] uppercase font-bold text-white/60">Quota</span>
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    value={currentQuota}
+                                    onChange={(e) => setCurrentQuota(Number(e.target.value))}
+                                    className="w-12 bg-transparent text-right font-black text-white text-sm outline-none"
+                                />
+                            </div>
+                            <div className="flex items-baseline gap-1">
+                                <span className="text-2xl text-blue-200 font-medium">€</span>
+                                <span className="text-5xl font-black text-white tracking-tighter drop-shadow-xl">{displayStake.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <h3 className="text-[10px] font-black text-indigo-400 border-b border-indigo-500/20 pb-2 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                    <HistoryIcon size={14} className="text-indigo-500" /> Trading Dashboard (PRO)
-                </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* RIGHT: ACTIONS (Win/Loss Buttons) */}
+                <div className="grid grid-cols-2 gap-3">
+                    {/* 1. VINTA (Top-Left) */}
                     <button
-                        onClick={onBreakEven}
-                        className="py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl text-[11px] font-black text-slate-300 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
+                        onClick={() => onFullBet(true, currentQuota)}
+                        className="group relative overflow-hidden py-4 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-lg shadow-xl border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all"
                     >
-                        <RefreshCw size={18} className="text-slate-500" />
-                        <div className="flex flex-col items-start leading-none">
-                            <span>BREAK EVEN</span>
-                            <span className="text-[8px] opacity-40 mt-1">€0.00 NET</span>
+                        <div className="flex flex-col items-center">
+                            <span className="flex items-center gap-2"><CheckCircle size={18} /> VINTA</span>
+                            <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold">100% TARGET</span>
                         </div>
                     </button>
 
+                    {/* 2. PERSA (Top-Right) */}
                     <button
-                        onClick={() => {
-                            const val = prompt("Inserisci il profitto NETTO realizzato (€):", "0.00");
-                            if (val !== null && val !== "") onAdjustment(Number(val), Number(val) > 0);
-                        }}
-                        className="py-3 bg-indigo-900/30 hover:bg-indigo-900/50 border border-indigo-500/30 rounded-xl text-[11px] font-black text-indigo-300 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
+                        onClick={() => onFullBet(false, currentQuota)}
+                        className="group relative overflow-hidden py-4 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-lg shadow-xl border-b-4 border-red-900 active:border-b-0 active:translate-y-1 transition-all"
                     >
-                        <TrendingUp size={18} className="text-indigo-400" />
-                        <div className="flex flex-col items-start leading-none">
-                            <span>PROFITTO PARZ.</span>
-                            <span className="text-[8px] opacity-40 mt-1">MANUAL +€</span>
+                        <div className="flex flex-col items-center text-white">
+                            <span className="flex items-center gap-2"><XCircle size={18} /> PERSA</span>
+                            <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">Loss Totale</span>
                         </div>
                     </button>
 
+                    {/* 3. VINCITA PARZIALE (Tesoretto) */}
                     <button
-                        onClick={() => {
-                            const val = prompt("Inserisci la perdita NETTA realizzata (€):", "0.00");
-                            if (val !== null && val !== "") onAdjustment(-Math.abs(Number(val)), false);
-                        }}
-                        className="py-3 bg-rose-900/30 hover:bg-rose-900/50 border border-rose-500/30 rounded-xl text-[11px] font-black text-rose-300 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 shadow-lg"
+                        onClick={() => onPartialWin(currentQuota)}
+                        className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl"
                     >
-                        <TrendingDown size={18} className="text-rose-400" />
-                        <div className="flex flex-col items-start leading-none">
-                            <span>PERDITA PARZ.</span>
-                            <span className="text-[8px] opacity-40 mt-1">MANUAL -€</span>
+                        <div className="flex flex-col items-center">
+                            <span className="flex items-center gap-2 text-green-400"><TrendingUp size={18} /> TESORETTO</span>
+                            <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">VINTA 50% (+$$)</span>
+                        </div>
+                    </button>
+
+                    {/* 4. SCONFITTA PARZIALE (Errore) */}
+                    <button
+                        onClick={() => onPartialLoss(currentQuota)}
+                        className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl"
+                    >
+                        <div className="flex flex-col items-center">
+                            <span className="flex items-center gap-1.5 text-red-500"><TrendingDown size={18} /> ERRORE</span>
+                            <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">PERSA 50% (-$$)</span>
                         </div>
                     </button>
                 </div>
             </div>
 
+
+
+            {/* 7. TRADING DASHBOARD */}
+            <div className="p-4 bg-slate-900/60 border border-slate-700/50 rounded-2xl">
+                <h3 className="text-[10px] font-black text-indigo-400 border-b border-indigo-500/20 pb-2 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                    <HistoryIcon size={14} /> Trading Dashboard (PRO)
+                </h3>
+                <div className="grid grid-cols-3 gap-3">
+                    <button onClick={onBreakEven} className="py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl text-[10px] font-bold text-slate-300 flex items-center justify-center gap-2 transition-all">
+                        <Shield size={14} className="opacity-50" /> BREAK EVEN
+                    </button>
+                    <button onClick={() => {
+                        const val = prompt("Profitto:", "0");
+                        if (val) onAdjustment(Number(val), true);
+                    }} className="py-3 bg-indigo-900/40 hover:bg-indigo-900/60 border border-indigo-500/30 rounded-xl text-[10px] font-bold text-indigo-300 flex items-center justify-center gap-2 transition-all">
+                        <Plus size={14} /> MANUAL WIN
+                    </button>
+                    <button onClick={() => {
+                        const val = prompt("Perdita:", "0");
+                        if (val) onAdjustment(-Math.abs(Number(val)), false);
+                    }} className="py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 rounded-xl text-[10px] font-bold text-red-300 flex items-center justify-center gap-2 transition-all">
+                        <Minus size={14} /> MANUAL LOSS
+                    </button>
+                </div>
+            </div>
+
+            {/* 8. EVENT LOG */}
             <div className="bg-slate-900/40 rounded-xl border border-slate-700/50 overflow-hidden">
                 <div className="px-5 py-3 border-b border-slate-700/50 bg-slate-800/50 flex justify-between items-center">
-                    <h3 className="font-bold text-[10px] uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
-                        <HistoryIcon size={14} /> Registro EventI ({currentPlan.events.filter((e) => !e.isSystemLog).length})
-                    </h3>
+                    <h3 className="font-bold text-[10px] uppercase tracking-[0.2em] text-slate-400">Registro Eventi</h3>
+                    <button
+                        onClick={() => {
+                            const csv = generateCSV(currentPlan);
+                            downloadCSV(csv, `masa_active_${currentPlan.id}.csv`);
+                        }}
+                        className="flex items-center gap-1 text-[10px] bg-slate-700 hover:bg-slate-600 border border-slate-600 px-2 py-1 rounded text-slate-200 transition-colors"
+                    >
+                        <Download size={10} /> CSV
+                    </button>
                 </div>
                 <div className="p-2 space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
                     {[...currentPlan.events].reverse().map((event) => (
-                        <div
-                            key={event.id}
-                            className={`p-3 rounded-xl flex justify-between items-center border transition-all hover:bg-slate-800/50 ${event.isSystemLog
-                                ? 'bg-orange-500/5 border-orange-500/20 text-orange-200'
-                                : event.isVoid
-                                    ? 'bg-slate-600/5 border-slate-600/20 text-slate-400'
-                                    : event.isWin
-                                        ? 'bg-green-500/5 border-green-500/20 shadow-[inset_0_0_10px_rgba(34,197,94,0.05)]'
-                                        : 'bg-red-500/5 border-red-500/20 shadow-[inset_0_0_10px_rgba(239,68,68,0.05)]'
-                                }`}
-                        >
-                            {event.isSystemLog ? (
-                                <div className="w-full flex justify-between items-center px-2">
-                                    <span className="font-bold text-xs uppercase tracking-tight flex items-center gap-2">
-                                        <LifeBuoy size={14} className="text-orange-400" /> {event.message}
-                                    </span>
-                                    <span className="text-[10px] tabular-nums opacity-40">
-                                        {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                </div>
-                            ) : (
-                                <>
-                                    <div className="flex items-center gap-3">
-                                        <div
-                                            className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs border ${event.isWin ? 'bg-green-500/20 border-green-500/30 text-green-400' : 'bg-red-500/20 border-red-500/30 text-red-400'
-                                                }`}
-                                        >
-                                            {event.id}
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-xs uppercase tracking-tight flex items-center gap-2">
-                                                {event.message ? (
-                                                    <span className="text-blue-400 flex items-center gap-1">
-                                                        {event.isVoid ? <RefreshCw size={12} /> : event.isWin ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                                                        {event.message}
-                                                    </span>
-                                                ) : event.isVoid ? (
-                                                    <>
-                                                        <AlertTriangle size={12} /> NULLO
-                                                    </>
-                                                ) : event.isWin ? (
-                                                    <>
-                                                        <CheckCircle size={12} className="text-green-500" /> Vinto
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <XCircle size={12} className="text-red-500" /> Perso
-                                                    </>
-                                                )}
-                                            </div>
-                                            <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2">
-                                                {event.isPartialSequence && (
-                                                    <span className="flex items-center gap-1 bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase">
-                                                        Sequenza
-                                                    </span>
-                                                )}
-                                                <span className="font-medium">Quota: {event.quota}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="font-medium text-sm text-slate-200 tracking-tight">€{event.capitalAfter.toFixed(2)}</div>
-                                        <div className="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Residuo</div>
-                                    </div>
-                                </>
-                            )}
+                        <div key={event.id} className={`p-3 rounded-lg text-xs flex justify-between border ${event.isWin ? 'bg-green-500/10 border-green-500/20 text-green-300' : event.isVoid ? 'bg-slate-700/30 border-slate-600 text-slate-400' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+                            <span className="font-medium flex items-center gap-2">
+                                {event.isWin ? <TrendingUp size={12} /> : event.isVoid ? <RefreshCw size={12} /> : <TrendingDown size={12} />}
+                                {event.message || (event.isVoid ? 'ANNULLATO' : event.isWin ? 'VINTA' : 'PERSA')} ({event.quota})
+                            </span>
+                            <span className="font-mono opacity-60">€{event.capitalAfter.toFixed(2)}</span>
                         </div>
                     ))}
+
+                    <DebugRules
+                        plan={currentPlan}
+                        activeRules={activeRules}
+                        config={{
+                            ...currentPlan,
+                            initialCapital: currentPlan.startCapital,
+                            weeklyTargetPercentage: 20,
+                            milestoneBankPercentage: 20,
+                            accumulationPercent: 50
+                        }}
+                    />
                 </div>
             </div>
-        </div >
+
+            <DebugRules
+                plan={currentPlan}
+                activeRules={activeRules}
+                config={{
+                    ...currentPlan,
+                    initialCapital: currentPlan.startCapital,
+                    weeklyTargetPercentage: 20,
+                    milestoneBankPercentage: 20,
+                    accumulationPercent: 50
+                }}
+            />
+        </div>
     );
 };
 

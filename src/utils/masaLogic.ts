@@ -1,3 +1,4 @@
+
 import { calculateMaxNetProfit, calculateMasaDenominator } from './mathUtils';
 
 export const calculateStake = (
@@ -31,9 +32,20 @@ export const calculateStake = (
     const denLoss = calculateMasaDenominator(re - 1, rw, cl + 1, m, q);
     const reqLoss = (t * denLoss) / Math.pow(q, re - 1);
 
-    const scalingFactor = c / reqNow;
     const theoreticalStake = (reqWin - reqLoss) / q;
-    const stake = theoreticalStake * scalingFactor;
+    let stake = 0;
+
+    if (c > reqNow) {
+        // Surplus: Use surplus to reduce effective target difficulty (Relax Mode)
+        const surplus = c - reqNow;
+        const effectiveTarget = t - surplus;
+        const relaxationFactor = effectiveTarget / t;
+        stake = theoreticalStake * relaxationFactor;
+    } else {
+        // Deficit: Standard Masaniello Safety Scaling
+        const scalingFactor = c / reqNow;
+        stake = theoreticalStake * scalingFactor;
+    }
 
     return Math.max(0, Math.min(stake, c));
 };
@@ -150,44 +162,6 @@ export const getEarlyClosureSuggestion = (
             reason: `Hai raggiunto il ${(yieldReached * 100).toFixed(0)}% del profitto massimo. Rischiare per il restante ${(100 - yieldReached * 100).toFixed(0)}% potrebbe non valere la pena.`,
             profitSecure: currentProfit
         };
-    }
-
-    return null;
-};
-
-export const checkValueBet = (
-    stake: number,
-    quota: number,
-    currentCapital: number,
-    remainingWins: number,
-    remainingEvents: number
-): { status: 'good' | 'warning' | 'critical', message: string, riskPercent: number } | null => {
-    // 1. Calculate Risk Impact
-    const riskPercent = (stake / currentCapital) * 100;
-    const potentialWin = stake * (quota - 1);
-    const rewardToRisk = potentialWin / stake; // effectively (Quota - 1)
-
-    // 2. Risk/Reward Analysis
-    let status: 'good' | 'warning' | 'critical' = 'good';
-    let message = '';
-
-    // Critical: High Risk for Low Reward (e.g., chasing small remaining profit with huge stake)
-    if (riskPercent > 25 && rewardToRisk < 0.5) {
-        status = 'critical';
-        message = `⚠️ Rischio eccessivo (${riskPercent.toFixed(1)}% cap) per un rendimento basso. Valuta di chiudere o spalmare su più eventi via Rescue.`;
-        return { status, message, riskPercent };
-    }
-    // Warning: Very High Stake
-    else if (riskPercent > 35) {
-        status = 'warning';
-        message = `⚠️ Stake molto alto (${riskPercent.toFixed(1)}% del capitale). Assicurati che l'evento sia ad alta affidabilità o usa Rescue per dividere l'importo.`;
-        return { status, message, riskPercent };
-    }
-    // Warning: Last chance pressure
-    else if (remainingEvents === remainingWins && remainingEvents > 0) {
-        status = 'warning';
-        message = `⚠️ "Must Win": Non puoi più sbagliare. Pressione massima.`;
-        return { status, message, riskPercent };
     }
 
     return null;

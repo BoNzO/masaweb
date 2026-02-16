@@ -13,6 +13,7 @@ interface StatsOverviewProps {
     estimatedDays: number;
     expectedWinsTotal: number;
     evPerformance: number;
+    onUpdateAbsoluteStartCapital: (newAmount: number) => void;
 }
 
 const StatsOverview: React.FC<StatsOverviewProps> = ({
@@ -27,9 +28,20 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     estimatedDays,
     expectedWinsTotal,
     evPerformance,
+    onUpdateAbsoluteStartCapital,
 }) => {
+    const [isEditingStart, setIsEditingStart] = React.useState(false);
+    const [tempStart, setTempStart] = React.useState(absoluteStartCapital.toString());
+
+    const handleUpdate = () => {
+        const val = parseFloat(tempStart);
+        if (!isNaN(val) && val > 0) {
+            onUpdateAbsoluteStartCapital(val);
+            setIsEditingStart(false);
+        }
+    };
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 gap-4 mb-6">
             <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg flex flex-col md:flex-row items-center justify-between gap-6">
                 <div className="flex-1">
                     <div className="text-slate-400 text-xs uppercase tracking-widest font-bold mb-1">
@@ -39,8 +51,31 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                         €{totalWorth.toFixed(2)}
                         <span className="text-sm text-slate-500 font-medium">/ €{startCapital.toFixed(2)}</span>
                     </div>
-                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 uppercase tracking-tighter font-bold">
-                        Su Cap. Iniziale: <span className="text-slate-400 font-medium">€{absoluteStartCapital.toFixed(2)}</span>
+                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 uppercase tracking-tighter font-bold group/cap">
+                        Su Cap. Iniziale:
+                        {isEditingStart ? (
+                            <div className="flex items-center gap-1 ml-1">
+                                <span className="text-slate-400">€</span>
+                                <input
+                                    type="number"
+                                    value={tempStart}
+                                    onChange={(e) => setTempStart(e.target.value)}
+                                    className="w-20 bg-slate-900 text-white font-bold text-xs px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-blue-500"
+                                    autoFocus
+                                    onKeyDown={(e) => e.key === 'Enter' && handleUpdate()}
+                                />
+                                <button onClick={handleUpdate} className="text-emerald-400 hover:bg-emerald-500/10 p-0.5 rounded"><XCircle size={14} className="rotate-45" /></button> {/* Using XCircle rotated as Check/Plus or just use simple text/icon if available. Let's use Check icon if imported, but XCircle is imported. I'll stick to a simple text or reuse XCircle for cancel? Wait, I need a check icon. XCircle is imported. I'll add Check/CheckCircle to imports or just use text. Let's import CheckCircle in next step if needed. For now using text 'OK' or existing icons. Let's use XCircle for cancel and click outside to save? No, explicit save. */}
+                                <button onClick={() => setIsEditingStart(false)} className="text-rose-400 hover:bg-rose-500/10 p-0.5 rounded"><XCircle size={14} /></button>
+                            </div>
+                        ) : (
+                            <span
+                                className="text-slate-400 font-medium cursor-pointer hover:text-blue-400 transition-colors border-b border-transparent hover:border-blue-400 dashed"
+                                onClick={() => { setTempStart(absoluteStartCapital.toString()); setIsEditingStart(true); }}
+                                title="Clicca per modificare il capitale iniziale storico"
+                            >
+                                €{absoluteStartCapital.toFixed(2)}
+                            </span>
+                        )}
                     </div>
                 </div>
 

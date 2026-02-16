@@ -18,6 +18,10 @@ const masaMemo: Record<string, number> = {};
  * Supports the "max consecutive losses" (m) condition.
  */
 export const calculateMasaDenominator = (n: number, k: number, cl: number, m: number, q: number): number => {
+    // If wins are achieved, the plan is successful regardless of future (unplayed) events.
+    // Return total weight of remaining paths (q^n).
+    if (k <= 0) return Math.pow(q, n);
+
     if (m > 0 && cl > m) return 0;
     if (n === 0) return k <= 0 ? 1 : 0;
 

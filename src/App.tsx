@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Settings,
   CheckCircle,
@@ -15,35 +15,38 @@ import ActivePlan from './components/ActivePlan';
 import AnalyticsSection from './components/AnalyticsSection';
 import HistoryLog from './components/HistoryLog';
 import TradingJournal from './components/TradingJournal';
+
 import { roundTwo } from './utils/mathUtils';
 import { calculatePerformance } from './utils/performanceUtils';
 import type { ChartDataPoint } from './types/masaniello';
-
-// RULES constant removed from top-level to be defined inside App for dynamic labels
 
 const App = () => {
   const {
     config,
     setConfig,
     currentPlan,
+    setCurrentPlan,
     history,
     activeRules,
     toggleRule,
-    sequence,
-    isSequenceActive,
+    toggleAllRules,
     startNewPlan,
     handleFullBet,
-    handlePartialStep,
+    handlePartialWin,
+    handlePartialLoss,
     handleBreakEven,
     handleAdjustment,
-    activateRescueMode,
     resetAll,
     transitionToNextPlan,
     getNextStake,
     getRescueSuggestion,
+    activateRescueMode,
+    updatePlanStartCapital,
+    updateAbsoluteStartCapital
+
   } = useMasaniello();
 
-  const RULES = [
+  const RULES = useMemo(() => [
     { id: 'first_win', label: 'Vittoria inziale (Completa o Somma Parziali) → Chiusura ciclo' },
     { id: 'back_positive', label: 'Ritorno in positivo dopo negativo → Chiusura ciclo' },
     { id: 'profit_90', label: '90% utile netto raggiunto → Reset ciclo' },
@@ -59,11 +62,7 @@ const App = () => {
       id: 'stop_loss',
       label: `Stop-Loss Ciclo: Chiudi automaticamente se il capitale scende del ${config.stopLossPercentage}%`,
     },
-    {
-      id: 'trailing_profit_stop',
-      label: `Trailing Profit: Attiva a ${config.trailingProfitActivation || 30}% profit e chiudi se scende sotto ${config.trailingProfitLock || 10}%`,
-    },
-  ];
+  ], [config.milestoneBankPercentage, config.stopLossPercentage]);
 
   const [showConfig, setShowConfig] = useState(!currentPlan);
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
@@ -102,7 +101,7 @@ const App = () => {
     return { active: isActive && !isSuspended, enabled: isEnabled, isSuspended };
   };
 
-  const getStats = () => {
+  const stats = useMemo(() => {
     const currentCapital = currentPlan ? currentPlan.currentCapital : 0;
     const totalBanked = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
     let absoluteStartCapital = config.initialCapital;
@@ -143,9 +142,10 @@ const App = () => {
       expectedWinsTotal,
       evPerformance
     };
-  };
+  }, [currentPlan, history, config.initialCapital, config.quota]);
 
-  const getChartData = () => {
+
+  const chartData = useMemo(() => {
     const data: ChartDataPoint[] = [{ name: 'Start', capital: config.initialCapital, days: 0 }];
     let totalEvents = 0;
 
@@ -173,9 +173,9 @@ const App = () => {
       });
     }
     return data;
-  };
+  }, [history, currentPlan, config.initialCapital]);
 
-  const getWeeklyHeatmapData = () => {
+  const heatmapData = useMemo(() => {
     const currentCapital = currentPlan ? currentPlan.currentCapital : config.initialCapital;
     const totalBanked = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
     let absoluteStartCapital = config.initialCapital;
@@ -203,9 +203,8 @@ const App = () => {
         }),
       };
     });
-  };
+  }, [currentPlan, history, config.initialCapital, config.weeklyTargetPercentage]);
 
-  const stats = getStats();
   const weeklyTarget = (config.weeklyTargetPercentage / 100) * (currentPlan?.startCapital || config.initialCapital);
 
   const handleReset = () => {
@@ -246,30 +245,33 @@ const App = () => {
 
       {view === 'dashboard' ? (
         <>
-          <StatsOverview
-            totalWorth={stats.totalWorth}
-            startCapital={currentPlan ? currentPlan.startCapital : config.initialCapital}
-            absoluteStartCapital={stats.absoluteStartCapital}
-            totalProfit={stats.totalProfit}
-            totalGrowth={stats.totalGrowth}
-            totalBanked={stats.totalBanked}
-            totalWins={stats.totalWins}
-            totalLosses={stats.totalLosses}
-            estimatedDays={stats.estimatedDays}
-            expectedWinsTotal={stats.expectedWinsTotal}
-            evPerformance={stats.evPerformance}
-          />
-
+          {/* MAIN GRID: Left (Stats+Charts) | Right (ActivePlan) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* LEFT COLUMN */}
             <div className="space-y-6">
+              <StatsOverview
+                totalWorth={stats.totalWorth}
+                startCapital={currentPlan ? currentPlan.startCapital : config.initialCapital}
+                absoluteStartCapital={stats.absoluteStartCapital}
+                totalProfit={stats.totalProfit}
+                totalGrowth={stats.totalGrowth}
+                totalBanked={stats.totalBanked}
+                totalWins={stats.totalWins}
+                totalLosses={stats.totalLosses}
+                estimatedDays={stats.estimatedDays}
+                expectedWinsTotal={stats.expectedWinsTotal}
+                evPerformance={stats.evPerformance}
+                onUpdateAbsoluteStartCapital={updateAbsoluteStartCapital}
+              />
+
               <AnalyticsSection
-                chartData={getChartData()}
-                heatmapData={getWeeklyHeatmapData()}
+                chartData={chartData}
+                heatmapData={heatmapData}
                 weeklyTarget={weeklyTarget}
                 weeklyTargetPercentage={config.weeklyTargetPercentage}
               />
 
-              <div className="flex gap-3 mt-6 flex-wrap">
+              <div className="flex gap-3 flex-wrap">
                 <button onClick={() => setShowConfig(!showConfig)} className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors text-xs font-bold">
                   <Settings size={18} /> CONFIG
                 </button>
@@ -286,65 +288,45 @@ const App = () => {
               </div>
             </div>
 
-            <div className="hidden lg:block lg:sticky lg:top-6 lg:self-start">
+            {/* RIGHT COLUMN: Active Plan (Sticky) & Configuration */}
+            <div className="lg:sticky lg:top-6 lg:self-start space-y-6">
+              {showConfig && (
+                <ConfigurationPanel
+                  config={config}
+                  setConfig={setConfig}
+                  onStart={() => {
+                    startNewPlan();
+                    setShowConfig(false);
+                  }}
+                />
+              )}
+
               {currentPlan && (
                 <ActivePlan
-                  initialCapital={config.initialCapital}
                   currentPlan={currentPlan}
-                  isSequenceActive={isSequenceActive}
-                  sequence={sequence}
                   activeRules={activeRules}
                   rules={RULES}
                   toggleRule={toggleRule}
+                  toggleAllRules={toggleAllRules}
                   getRuleStatus={getRuleStatus}
                   onFullBet={handleFullBet}
-                  onPartialStep={handlePartialStep}
+                  onPartialWin={handlePartialWin}
+                  onPartialLoss={handlePartialLoss}
                   onBreakEven={handleBreakEven}
                   onAdjustment={handleAdjustment}
                   onActivateRescue={activateRescueMode}
                   onEarlyClose={handleCloseCycle}
                   getNextStake={getNextStake}
                   getRescueSuggestion={getRescueSuggestion}
+                  onUpdatePlan={setCurrentPlan}
+                  onUpdateStartCapital={updatePlanStartCapital}
+                  config={config}
                 />
               )}
             </div>
           </div>
 
-          <div className="block lg:hidden mb-6">
-            {currentPlan && (
-              <ActivePlan
-                initialCapital={config.initialCapital}
-                currentPlan={currentPlan}
-                isSequenceActive={isSequenceActive}
-                sequence={sequence}
-                activeRules={activeRules}
-                rules={RULES}
-                toggleRule={toggleRule}
-                getRuleStatus={getRuleStatus}
-                onFullBet={handleFullBet}
-                onPartialStep={handlePartialStep}
-                onBreakEven={handleBreakEven}
-                onAdjustment={handleAdjustment}
-                onActivateRescue={activateRescueMode}
-                onEarlyClose={handleCloseCycle}
-                getNextStake={getNextStake}
-                getRescueSuggestion={getRescueSuggestion}
-              />
-            )}
-          </div>
-
           <HistoryLog history={history} expandedHistory={expandedHistory} setExpandedHistory={setExpandedHistory} />
-
-          {showConfig && (
-            <ConfigurationPanel
-              config={config}
-              setConfig={setConfig}
-              onStart={() => {
-                startNewPlan();
-                setShowConfig(false);
-              }}
-            />
-          )}
 
           {!currentPlan && !showConfig && (
             <div className="bg-slate-800 p-12 rounded-lg text-center border border-slate-700 border-dashed">

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Config, MasaPlan, MasaEvent, EventDetail } from '../types/masaniello';
+import type { Config, MasaPlan, MasaEvent, EventSnapshot } from '../types/masaniello';
 import { roundTwo, calculateMaxNetProfit } from '../utils/mathUtils';
 import { calculateStake, getRescueSuggestion } from '../utils/masaLogic';
 
@@ -14,17 +14,52 @@ export const useMasaniello = () => {
             accumulationPercent: 50,
             weeklyTargetPercentage: 20,
             milestoneBankPercentage: 20,
-            stopLossPercentage: 100,
-            trailingProfitActivation: 30, // Default: Activate when 30% of max profit reached
-            trailingProfitLock: 10,       // Default: Lock 10% profit minimum
+            stopLossPercentage: 100
         };
         return saved ? { ...defaultConfig, ...JSON.parse(saved) } : defaultConfig;
     });
 
-    const [currentPlan, setCurrentPlan] = useState<MasaPlan | null>(() => {
-        const saved = localStorage.getItem('masa_current_plan');
-        return saved ? JSON.parse(saved) : null;
+    const [plans, setPlans] = useState<Record<string, MasaPlan>>(() => {
+        const saved = localStorage.getItem('masa_plans');
+        // Migration: If old 'masa_current_plan' exists, convert it to the new structure
+        if (!saved) {
+            const oldPlan = localStorage.getItem('masa_current_plan');
+            if (oldPlan) {
+                const parsed = JSON.parse(oldPlan);
+                return { [parsed.id]: parsed };
+            }
+            return {};
+        }
+        return JSON.parse(saved);
     });
+
+    const [activePlanId, setActivePlanId] = useState<string | null>(() => {
+        const saved = localStorage.getItem('masa_active_plan_id');
+        if (saved) return JSON.parse(saved);
+        // Fallback: use key of first plan if exists
+        const planKeys = Object.keys(JSON.parse(localStorage.getItem('masa_plans') || '{}'));
+        return planKeys.length > 0 ? planKeys[0] : null;
+    });
+
+    const currentPlan = activePlanId && plans[activePlanId] ? plans[activePlanId] : null;
+
+    const setCurrentPlan = (plan: MasaPlan | null) => {
+        if (plan) {
+            setPlans(prev => ({ ...prev, [plan.id]: plan }));
+            if (!activePlanId) setActivePlanId(String(plan.id));
+        } else if (activePlanId) {
+            // If null is passed, it implies removing or archiving the current plan? 
+            // For now, let's keep the old behavior of "resetting" current context, 
+            // but in a tree view we might just want to set status to 'completed'.
+            // For backward compatibility with 'resetAll', we clear the plan from dictionary.
+            setPlans(prev => {
+                const newPlans = { ...prev };
+                delete newPlans[activePlanId];
+                return newPlans;
+            });
+            setActivePlanId(null);
+        }
+    };
 
     const [history, setHistory] = useState<MasaPlan[]>(() => {
         const saved = localStorage.getItem('masa_history');
@@ -43,20 +78,22 @@ export const useMasaniello = () => {
             'smart_auto_close',
             'profit_milestone',
             'stop_loss',
-            'trailing_profit_stop',
         ];
     });
 
-    const [sequence, setSequence] = useState<EventDetail[]>([]);
-    const [isSequenceActive, setIsSequenceActive] = useState(false);
+
 
     useEffect(() => {
         localStorage.setItem('masa_config', JSON.stringify(config));
     }, [config]);
 
     useEffect(() => {
-        localStorage.setItem('masa_current_plan', JSON.stringify(currentPlan));
-    }, [currentPlan]);
+        localStorage.setItem('masa_plans', JSON.stringify(plans));
+    }, [plans]);
+
+    useEffect(() => {
+        localStorage.setItem('masa_active_plan_id', JSON.stringify(activePlanId));
+    }, [activePlanId]);
 
     useEffect(() => {
         localStorage.setItem('masa_history', JSON.stringify(history));
@@ -74,27 +111,44 @@ export const useMasaniello = () => {
         );
     };
 
+    const toggleAllRules = (allRuleIds: string[]) => {
+        setActiveRules((prev) => {
+            const areAllActive = allRuleIds.every(id => prev.includes(id));
+            return areAllActive ? [] : allRuleIds;
+        });
+    };
 
-    const createNewPlan = (startCapital: number | null = null): MasaPlan => {
-        const capital = startCapital !== null ? startCapital : config.initialCapital;
+    const savePlan = (plan: MasaPlan) => {
+        setCurrentPlan(plan);
+        // LocalStorage update is handled by useEffect [currentPlan]
+    };
+
+
+    const createNewPlan = (startCapital: number | null = null, parentId: number | null = null, generation: number | null = null, configOverrides: Partial<Config> = {}, parentPlan?: MasaPlan): MasaPlan => {
+        const effectiveConfig = { ...config, ...configOverrides };
+        const capital = startCapital !== null ? startCapital : effectiveConfig.initialCapital;
         const maxProfit = calculateMaxNetProfit(
             capital,
-            config.totalEvents,
-            config.expectedWins,
-            config.quota
+            effectiveConfig.totalEvents,
+            effectiveConfig.expectedWins,
+            effectiveConfig.quota,
+            effectiveConfig.maxConsecutiveLosses
         );
         return {
             id: Date.now(),
             startCapital: capital,
             currentCapital: capital,
             targetCapital: capital + maxProfit,
+            // Calculate initial target based on START capital of this plan
+            // ABSOLUTE TARGET: Capital to reach (e.g. 1000 + 20% = 1200)
+            currentWeeklyTarget: capital * (1 + effectiveConfig.weeklyTargetPercentage / 100),
             maxNetProfit: maxProfit,
-            quota: config.quota,
-            totalEvents: config.totalEvents,
-            expectedWins: config.expectedWins,
+            quota: effectiveConfig.quota,
+            totalEvents: effectiveConfig.totalEvents,
+            expectedWins: effectiveConfig.expectedWins,
             events: [],
-            remainingEvents: config.totalEvents,
-            remainingWins: config.expectedWins,
+            remainingEvents: effectiveConfig.totalEvents,
+            remainingWins: effectiveConfig.expectedWins,
             wins: 0,
             losses: 0,
             status: 'active',
@@ -103,14 +157,22 @@ export const useMasaniello = () => {
             accumulatedAmount: 0,
             isRescued: false,
             createdAt: new Date().toISOString(),
-            generationNumber: currentPlan ? (currentPlan.generationNumber || 0) + 1 : 0,
-            maxConsecutiveLosses: config.maxConsecutiveLosses,
+            generationNumber: generation !== null ? generation : (currentPlan ? (currentPlan.generationNumber || 0) + 1 : 0),
+            maxConsecutiveLosses: effectiveConfig.maxConsecutiveLosses,
             currentConsecutiveLosses: 0,
+            parentId: parentId,
+            childrenIds: [],
+            treeStatus: 'active',
+            tags: [],
+            // Inherit milestone tracking from parent plan to avoid re-triggering rules immediately
+            profitMilestoneReached: parentPlan?.profitMilestoneReached || 0,
+            milestonesBanked: parentPlan?.milestonesBanked || 0
         };
     };
 
     const startNewPlan = () => {
-        setCurrentPlan(createNewPlan());
+        const newPlan = createNewPlan();
+        setCurrentPlan(newPlan);
     };
 
     const transitionToNextPlan = (closingPlan: MasaPlan, reason: string, ruleId: string | null) => {
@@ -118,209 +180,227 @@ export const useMasaniello = () => {
         let milestonesBanked = 0;
         const cycleProfit = roundTwo(closingPlan.currentCapital - closingPlan.startCapital);
 
-        if (reason === 'auto_bank_100' && config.accumulationPercent > 0 && cycleProfit > 0) {
-            const bankedMilestoneCountBefore = history.reduce(
-                (acc, p) => acc + (p.milestonesBanked || (p.status === 'auto_bank_100' ? 1 : 0)),
-                0
-            );
-            const totalBankedSoFar = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
-            let absoluteStartCap = config.initialCapital;
-            if (history.length > 0) absoluteStartCap = history[0].startCapital;
-
-            const currentTotalProfit = roundTwo(closingPlan.currentCapital + totalBankedSoFar - absoluteStartCap);
-            const targetValue = (config.weeklyTargetPercentage / 100) * (closingPlan.startCapital || config.initialCapital);
-            const targetMilestoneCount = Math.floor(currentTotalProfit / targetValue);
-            const milestonesToBankNow = Math.max(0, targetMilestoneCount - bankedMilestoneCountBefore);
-
-            if (milestonesToBankNow > 0) {
-                const theoreticalAmount = milestonesToBankNow * targetValue * (config.accumulationPercent / 100);
-                amountToBank = Math.min(cycleProfit, roundTwo(theoreticalAmount));
-                milestonesBanked = milestonesToBankNow;
+        // 1. Weekly Target (Auto Bank 100) - PLAN LOCAL
+        if (reason === 'auto_bank_100') {
+            // Simple rule: Bank % of CURRENT cycle profit
+            if (config.accumulationPercent > 0 && cycleProfit > 0) {
+                amountToBank = roundTwo(cycleProfit * (config.accumulationPercent / 100));
             }
         }
 
+        // 2. Profit Milestone (Global)
         let currentMilestone = 0;
-        if (reason === 'profit_milestone' && cycleProfit > 0) {
+        if (reason === 'profit_milestone') {
             const totalBankedSoFar = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
             let absoluteStartCap = config.initialCapital;
             if (history.length > 0) absoluteStartCap = history[0].startCapital;
+
             const totalWorth = closingPlan.currentCapital + totalBankedSoFar;
             currentMilestone = Math.floor(totalWorth / config.initialCapital);
-            const currentTotalProfit = roundTwo(totalWorth - absoluteStartCap);
-            amountToBank = roundTwo(currentTotalProfit * (config.milestoneBankPercentage / 100));
+
+            if (cycleProfit > 0) {
+                // Calculate theoretical amount based on GLOBAL profit increment
+                const currentTotalProfit = roundTwo(totalWorth - absoluteStartCap);
+                const theoreticalAmount = roundTwo(currentTotalProfit * (config.milestoneBankPercentage / 100));
+
+                // Safety: Cap banking at 50% of current available capital to avoid bankrupting the active plan
+                amountToBank = Math.min(theoreticalAmount, roundTwo(closingPlan.currentCapital * 0.5));
+            }
+        }
+
+        // 3. End of Cycle Banking (Target Reached / Manual Close with Profit)
+        const isEndCondition = reason === 'manual_close' || reason === 'completed' || reason === 'target_reached' || reason === 'rescue_target_reached';
+        if (isEndCondition && config.accumulationPercent > 0 && cycleProfit > 0) {
+            // Bank configured % of the cycle profit
+            amountToBank = roundTwo(cycleProfit * (config.accumulationPercent / 100));
         }
 
         const nextCapital = roundTwo(closingPlan.currentCapital - amountToBank);
+
+        // Add Banking Log directly to the plan events before closing
+        let finalEvents = [...closingPlan.events];
+        if (amountToBank > 0) {
+            finalEvents.push({
+                id: `BANKING_${Date.now()}`,
+                stake: 0,
+                isWin: false,
+                isVoid: true,
+                isPartialSequence: false,
+                isSystemLog: true,
+                message: `BANKING: Accantonati €${amountToBank} (${config.accumulationPercent}%)`,
+                capitalAfter: closingPlan.currentCapital, // Capital doesn't decrease in plan, but is removed from *next* start
+                eventsLeft: closingPlan.remainingEvents,
+                winsLeft: closingPlan.remainingWins,
+                timestamp: new Date().toISOString(),
+                quota: closingPlan.quota,
+                snapshot: createSnapshot(closingPlan)
+            });
+        }
+
         const closedPlanWithStats: MasaPlan = {
             ...closingPlan,
+            events: finalEvents,
             status: reason,
+            treeStatus: 'completed',
             triggeredRule: ruleId,
             accumulatedAmount: amountToBank,
             milestonesBanked: milestonesBanked,
-            profitMilestoneReached: currentMilestone > 0 ? currentMilestone : undefined,
+            // Critical: Preserve previous High Water Mark if not currently updating it
+            profitMilestoneReached: (reason === 'profit_milestone' && currentMilestone > 0)
+                ? currentMilestone
+                : (closingPlan.profitMilestoneReached || 0),
         };
 
-        setHistory([...history, closedPlanWithStats]);
-        setCurrentPlan(createNewPlan(nextCapital));
+        // Update the closed plan in history/storage
+        setPlans(prev => ({ ...prev, [closedPlanWithStats.id]: closedPlanWithStats }));
+
+        // Add to history list (SAFER with functional update)
+        setHistory(prev => [...prev, closedPlanWithStats]);
+
+        // Create next plan linked to this one
+        // Create next plan linked to this one
+        const nextPlan = createNewPlan(
+            nextCapital,
+            closedPlanWithStats.id,
+            closedPlanWithStats.generationNumber + 1,
+            {},
+            closedPlanWithStats
+        );
+
+        // PERSISTENCE LOGIC (ABSOLUTE VALUE):
+        // If we closed for any reason OTHER than reaching the Weekly Target ('auto_bank_100'),
+        // we must inherit the previous ABSOLUTE target.
+        if (reason !== 'auto_bank_100' && closingPlan.currentWeeklyTarget) {
+            nextPlan.currentWeeklyTarget = closingPlan.currentWeeklyTarget;
+        }
+
+        // Update closed plan to point to child
+        setPlans(prev => ({
+            ...prev,
+            [closedPlanWithStats.id]: {
+                ...closedPlanWithStats,
+                childrenIds: [...(closedPlanWithStats.childrenIds || []), nextPlan.id]
+            },
+            [nextPlan.id]: nextPlan
+        }));
+
+        setActivePlanId(String(nextPlan.id));
     };
 
-    const finalizeSequence = (finalSequence: EventDetail[], planState: MasaPlan) => {
-        let isFullWin = false;
-        let isFullLoss = false;
-        let isVoid = false;
+    const createSnapshot = (plan: MasaPlan): EventSnapshot => {
+        return {
+            config: { ...config },
+            activeRules: [...activeRules],
+            isRescued: plan.isRescued,
+            currentConsecutiveLosses: plan.currentConsecutiveLosses || 0,
+            maxConsecutiveLosses: plan.maxConsecutiveLosses,
+            suggestedStake: getNextStake(plan.quota),
+            targetCapital: plan.targetCapital
+        };
+    };
 
-        if (finalSequence.length === 1) {
-            isFullWin = finalSequence[0].isWin;
-            isFullLoss = !isFullWin;
-        } else {
-            const r1 = finalSequence[0].isWin;
-            const r2 = finalSequence[1].isWin;
-            if (r1 && r2) isFullWin = true;
-            else if (!r1 && !r2) isFullLoss = true;
-            else isVoid = true;
+
+
+    const checkPlanStatus = (planState: MasaPlan) => {
+        // 1. Max Consecutive Losses
+        if (planState.maxConsecutiveLosses && planState.maxConsecutiveLosses > 0 &&
+            planState.currentConsecutiveLosses && planState.currentConsecutiveLosses > planState.maxConsecutiveLosses) {
+            const failedPlan = { ...planState, status: 'failed', triggeredRule: 'max_losses' };
+            setHistory([...history, failedPlan]);
+            setCurrentPlan(null);
+            return;
         }
 
-        const totalStake = finalSequence.reduce((acc, step) => acc + step.stake, 0);
-        const nextEventsLeft = isVoid ? planState.remainingEvents : planState.remainingEvents - 1;
-        let nextWinsLeft = planState.remainingWins;
-        if (isFullWin) nextWinsLeft -= 1;
-
-        const nextTotalWins = isFullWin ? planState.wins + 1 : planState.wins;
-        const nextTotalLosses = isFullLoss ? planState.losses + 1 : planState.losses;
         const startCap = roundTwo(planState.startCapital);
-        const isCurrentlyNegative = planState.currentCapital < startCap - 0.01;
-        const wasNegativePersistent = planState.wasNegative || isCurrentlyNegative;
 
-        const newEvent: MasaEvent = {
-            id: planState.events.filter((e) => !e.isSystemLog).length + 1,
-            stake: totalStake,
-            isWin: isFullWin,
-            isVoid: isVoid,
-            isPartialSequence: finalSequence.length > 1,
-            sequenceDetails: finalSequence,
-            capitalAfter: planState.currentCapital,
-            eventsLeft: nextEventsLeft,
-            winsLeft: nextWinsLeft,
-            timestamp: new Date().toISOString(),
-            quota: planState.quota,
-        };
+        // 2. First Win Rule
+        if (activeRules.includes('first_win') && planState.wins > (currentPlan?.wins || 0) && planState.losses === 0) {
+            transitionToNextPlan(planState, 'first_win_close', 'first_win');
+            return;
+        }
 
-        const nextCL = isFullLoss ? (planState.currentConsecutiveLosses || 0) + 1 : (isVoid ? (planState.currentConsecutiveLosses || 0) : 0);
+        // 3. Back Positive Rule
+        if (activeRules.includes('back_positive') && currentPlan?.wasNegative && planState.currentCapital >= startCap - 0.01) {
+            transitionToNextPlan(planState, 'back_positive_close', 'back_positive');
+            return;
+        }
 
-        const finalPlan: MasaPlan = {
-            ...planState,
-            events: [...planState.events, newEvent],
-            remainingEvents: nextEventsLeft,
-            remainingWins: nextWinsLeft,
-            wins: nextTotalWins,
-            losses: nextTotalLosses,
-            wasNegative: wasNegativePersistent,
-            currentConsecutiveLosses: nextCL,
-        };
+        // 4. Profit 90% Rule
+        const profitMade = planState.currentCapital - startCap;
+        if (activeRules.includes('profit_90') && profitMade >= planState.maxNetProfit * 0.9) {
+            transitionToNextPlan(planState, 'profit_90_reset', 'profit_90');
+            return;
+        }
 
-        setSequence([]);
-        setIsSequenceActive(false);
+        // 5. All Wins (Completed)
+        if (planState.remainingWins <= 0) {
+            const isRescueNegative = planState.isRescued && planState.currentCapital < startCap - 0.01;
 
-        if (!isVoid) {
-            const totalBankedSoFar = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
-            let absoluteStartCap = config.initialCapital;
-            if (history.length > 0) absoluteStartCap = history[0].startCapital;
-            else absoluteStartCap = finalPlan.startCapital;
-
-            const currentTotalProfit = roundTwo(finalPlan.currentCapital + totalBankedSoFar - absoluteStartCap);
-            const bankedMilestoneCount = history.reduce((acc, p) => acc + (p.milestonesBanked || (p.status === 'auto_bank_100' ? 1 : 0)), 0);
-            const targetValue = (config.weeklyTargetPercentage / 100) * (currentPlan?.startCapital || config.initialCapital);
-            const targetMilestoneCount = Math.floor(currentTotalProfit / targetValue);
-            const cycleProfit = finalPlan.currentCapital - finalPlan.startCapital;
-
-            if (activeRules.includes('auto_bank_100') && targetMilestoneCount > bankedMilestoneCount && targetValue > 0 && isFullWin && cycleProfit > 0.01) {
-                transitionToNextPlan(finalPlan, 'auto_bank_100', 'auto_bank_100');
-                return;
-            }
-
-            const vinit = config.initialCapital;
-            const vcurr = finalPlan.currentCapital;
-            const totalWorth = vcurr + totalBankedSoFar;
-            const currentMilestoneIndex = Math.floor(totalWorth / vinit);
-            const maxMilestoneInHistory = history.reduce((max, p) => Math.max(max, p.profitMilestoneReached || 0), 1);
-
-            if (activeRules.includes('profit_milestone') && currentMilestoneIndex > maxMilestoneInHistory) {
-                transitionToNextPlan(finalPlan, 'profit_milestone', 'profit_milestone');
-                return;
-            }
-
-            if (activeRules.includes('impossible') && (nextEventsLeft < nextWinsLeft || (nextEventsLeft === 0 && nextWinsLeft > 0))) {
-                finalPlan.status = 'failed';
-                finalPlan.triggeredRule = 'impossible';
-                setHistory([...history, finalPlan]);
-                setCurrentPlan(null);
-                return;
-            }
-
-            if (finalPlan.maxConsecutiveLosses && finalPlan.maxConsecutiveLosses > 0 && finalPlan.currentConsecutiveLosses && finalPlan.currentConsecutiveLosses > finalPlan.maxConsecutiveLosses) {
-                finalPlan.status = 'failed';
-                finalPlan.triggeredRule = 'max_losses';
-                setHistory([...history, finalPlan]);
-                setCurrentPlan(null);
-                return;
-            }
-
-            if (activeRules.includes('first_win') && isFullWin && planState.losses === 0) {
-                transitionToNextPlan(finalPlan, 'first_win_close', 'first_win');
-                return;
-            }
-            if (activeRules.includes('back_positive') && planState.wasNegative && planState.currentCapital >= startCap - 0.01) {
-                transitionToNextPlan(finalPlan, 'back_positive_close', 'back_positive');
-                return;
-            }
-            const profitMade = planState.currentCapital - startCap;
-            if (activeRules.includes('profit_90') && profitMade >= planState.maxNetProfit * 0.9) {
-                transitionToNextPlan(finalPlan, 'profit_90_reset', 'profit_90');
-                return;
-            }
-            if (activeRules.includes('all_wins') && nextWinsLeft === 0) {
-                // If rescued but still in loss relative to THIS cycle's start, don't auto-close.
-                if (!(finalPlan.isRescued && finalPlan.currentCapital < finalPlan.startCapital - 0.01)) {
-                    transitionToNextPlan(finalPlan, 'completed', 'all_wins');
-                    return;
-                }
-            }
-
-            const eventsPlayed = finalPlan.totalEvents - nextEventsLeft;
-            const progressPercent = eventsPlayed / finalPlan.totalEvents;
-            const capitalRetention = finalPlan.currentCapital / finalPlan.startCapital;
-            if (activeRules.includes('smart_auto_close') && progressPercent > 0.65 && capitalRetention > 0.90) {
-                transitionToNextPlan(finalPlan, 'smart_auto_close', 'smart_auto_close');
-                return;
-            }
-
-            const drawdown = (finalPlan.startCapital - finalPlan.currentCapital) / finalPlan.startCapital;
-            if (activeRules.includes('stop_loss') && drawdown >= config.stopLossPercentage / 100) {
-                transitionToNextPlan(finalPlan, 'stop_loss_triggered', 'stop_loss');
-                transitionToNextPlan(finalPlan, 'stop_loss_triggered', 'stop_loss');
-                return;
-            }
-
-            // Trailing Profit Logic
-            const trailingActivationThreshold = finalPlan.maxNetProfit * ((config.trailingProfitActivation || 30) / 100);
-            const trailingLockThreshold = finalPlan.maxNetProfit * ((config.trailingProfitLock || 10) / 100);
-
-            // Check if we ever reached the activation threshold in this plan's history
-            const peakCapital = Math.max(finalPlan.startCapital, ...finalPlan.events.map(e => e.capitalAfter));
-            const peakProfitGenerated = peakCapital - finalPlan.startCapital;
-            const currentProfitGenerated = finalPlan.currentCapital - finalPlan.startCapital;
-
-            if (
-                activeRules.includes('trailing_profit_stop') &&
-                peakProfitGenerated >= trailingActivationThreshold && // Activated because we reached peak
-                currentProfitGenerated <= trailingLockThreshold && // Fell below lock zone
-                currentProfitGenerated > 0 // But still profitable
-            ) {
-                transitionToNextPlan(finalPlan, 'trailing_stop_profit', 'trailing_profit_stop');
+            if (!isRescueNegative) {
+                transitionToNextPlan(planState, 'completed', 'all_wins');
                 return;
             }
         }
-        setCurrentPlan(finalPlan);
+
+        // 6. Stop Loss
+        const drawdown = (startCap - planState.currentCapital) / startCap;
+        if (activeRules.includes('stop_loss') && drawdown >= config.stopLossPercentage / 100) {
+            transitionToNextPlan(planState, 'stop_loss_triggered', 'stop_loss');
+            return;
+        }
+
+        // 7. Rescue Target Reached
+        if (planState.isRescued) {
+            const recoveryRatio = planState.currentCapital / startCap;
+            if (recoveryRatio >= 0.90) {
+                transitionToNextPlan(planState, 'rescue_target_reached', 'rescue_target_reached');
+                return;
+            }
+        }
+
+        // 8. Auto Bank 100 (Weekly Target) - PLAN LOCAL
+        if (activeRules.includes('auto_bank_100')) {
+            // Check against PERSISTED ABSOLUTE target if available, otherwise calculate on fly
+            // Target is now an ABSOLUTE CAPITAL VALUE (e.g. 1200), not a profit delta (200)
+            const absoluteTarget = planState.currentWeeklyTarget ?? (planState.startCapital * (1 + config.weeklyTargetPercentage / 100));
+
+            if (planState.currentCapital >= absoluteTarget && (planState.currentCapital - planState.startCapital) > 0) {
+                transitionToNextPlan(planState, 'auto_bank_100', 'auto_bank_100');
+                return;
+            }
+        }
+
+        // 9. Profit Milestone (Multiple of Capital)
+        if (activeRules.includes('profit_milestone')) {
+            const totalBankedSoFar = history.reduce((acc, p) => acc + (p.accumulatedAmount || 0), 0);
+            const totalWorth = planState.currentCapital + totalBankedSoFar;
+            const currentMilestone = Math.floor(totalWorth / config.initialCapital);
+
+            if (currentMilestone > (planState.profitMilestoneReached || 0) && currentMilestone > 0) {
+                transitionToNextPlan(planState, 'profit_milestone', 'profit_milestone');
+                return;
+            }
+        }
+
+        // Impossible Rule (moved from finalizeSequence)
+        if (activeRules.includes('impossible') && (planState.remainingEvents < planState.remainingWins || (planState.remainingEvents === 0 && planState.remainingWins > 0))) {
+            const failedPlan = { ...planState, status: 'failed', triggeredRule: 'impossible' };
+            setHistory([...history, failedPlan]);
+            setCurrentPlan(null);
+            return;
+        }
+
+        // Smart Auto Close
+        const eventsPlayed = planState.totalEvents - planState.remainingEvents;
+        const progressPercent = eventsPlayed / planState.totalEvents;
+        const capitalRetention = planState.currentCapital / planState.startCapital;
+        if (activeRules.includes('smart_auto_close') && progressPercent > 0.65 && capitalRetention > 0.90) {
+            transitionToNextPlan(planState, 'smart_auto_close', 'smart_auto_close');
+            return;
+        }
+
+        // If no termination, just update state
+        setCurrentPlan(planState);
     };
 
     const getNextStake = (customQuota?: number) => {
@@ -336,25 +416,89 @@ export const useMasaniello = () => {
         );
     };
 
-    const handlePartialStep = (isWin: boolean, customQuota?: number) => {
+    const handlePartialWin = (activeQuota: number) => {
         if (!currentPlan) return;
-        const activeQuota = customQuota || currentPlan.quota;
         const fullStake = getNextStake(activeQuota);
         const halfStake = roundTwo(fullStake / 2);
-        const stakeToUse = sequence.length === 0 ? halfStake : sequence[0].stake;
-        const netResult = isWin ? stakeToUse * (activeQuota - 1) : -stakeToUse;
-        const newStep: EventDetail = { stake: stakeToUse, isWin, netResult };
-        const newSequence = [...sequence, newStep];
-        const intermediateCapital = roundTwo(currentPlan.currentCapital + netResult);
-        const tempPlan: MasaPlan = { ...currentPlan, currentCapital: intermediateCapital };
+        const profit = roundTwo(halfStake * (activeQuota - 1));
+        const newCapital = roundTwo(currentPlan.currentCapital + profit);
 
-        if (newSequence.length === 2) {
-            finalizeSequence(newSequence, tempPlan);
-        } else {
-            setSequence(newSequence);
-            setIsSequenceActive(true);
-            setCurrentPlan(tempPlan);
-        }
+        const newEvent: MasaEvent = {
+            id: currentPlan.events.filter((e) => !e.isSystemLog).length + 1,
+            stake: halfStake,
+            isWin: true,
+            isVoid: false,
+            isPartialSequence: true,
+            message: 'Vincita Parziale (Tesoretto)',
+            capitalAfter: newCapital,
+            eventsLeft: currentPlan.remainingEvents,
+            winsLeft: currentPlan.remainingWins,
+            timestamp: new Date().toISOString(),
+            quota: activeQuota,
+            snapshot: createSnapshot(currentPlan)
+        };
+
+        const updatedPlan: MasaPlan = {
+            ...currentPlan,
+            currentCapital: newCapital,
+            events: [...currentPlan.events, newEvent],
+            maxNetProfit: calculateMaxNetProfit(
+                newCapital,
+                currentPlan.remainingEvents,
+                currentPlan.remainingWins,
+                currentPlan.quota,
+                currentPlan.maxConsecutiveLosses || 0
+            )
+        };
+
+        checkPlanStatus(updatedPlan);
+    };
+
+
+    const handlePartialLoss = (activeQuota: number) => {
+        if (!currentPlan) return;
+        const fullStake = getNextStake(activeQuota);
+        const halfStake = roundTwo(fullStake / 2);
+        const lossAmount = halfStake;
+        const newCapital = roundTwo(currentPlan.currentCapital - lossAmount);
+
+        // Count as ERROR
+        const nextEventsLeft = currentPlan.remainingEvents - 1;
+        const nextWinsLeft = currentPlan.remainingWins;
+
+        const newEvent: MasaEvent = {
+            id: currentPlan.events.filter((e) => !e.isSystemLog).length + 1,
+            stake: halfStake,
+            isWin: false,
+            isVoid: false,
+            isPartialSequence: true,
+            message: 'Sconfitta Parziale (1/2 Stake)',
+            capitalAfter: newCapital,
+            eventsLeft: nextEventsLeft,
+            winsLeft: nextWinsLeft,
+            timestamp: new Date().toISOString(),
+            quota: activeQuota,
+            snapshot: createSnapshot(currentPlan)
+        };
+
+        const updatedPlan: MasaPlan = {
+            ...currentPlan,
+            currentCapital: newCapital,
+            events: [...currentPlan.events, newEvent],
+            remainingEvents: nextEventsLeft,
+            losses: currentPlan.losses + 1,
+            currentConsecutiveLosses: (currentPlan.currentConsecutiveLosses || 0) + 1,
+            maxNetProfit: calculateMaxNetProfit(
+                newCapital,
+                nextEventsLeft,
+                nextWinsLeft,
+                currentPlan.quota,
+                currentPlan.maxConsecutiveLosses || 0
+            )
+
+        };
+
+        checkPlanStatus(updatedPlan);
     };
 
     const handleFullBet = (isWin: boolean, customQuota?: number) => {
@@ -363,9 +507,46 @@ export const useMasaniello = () => {
         const fullStake = getNextStake(activeQuota);
         const netResult = isWin ? fullStake * (activeQuota - 1) : -fullStake;
         const newCapital = roundTwo(currentPlan.currentCapital + netResult);
-        const fullSequence = [{ stake: fullStake, isWin, netResult }];
-        const tempPlan = { ...currentPlan, currentCapital: newCapital };
-        finalizeSequence(fullSequence, tempPlan);
+
+        const nextEventsLeft = currentPlan.remainingEvents - 1;
+        const nextWinsLeft = isWin ? currentPlan.remainingWins - 1 : currentPlan.remainingWins;
+
+        const sequenceDetail = [{ stake: fullStake, isWin, netResult }];
+
+        const newEvent: MasaEvent = {
+            id: currentPlan.events.filter((e) => !e.isSystemLog).length + 1,
+            stake: fullStake,
+            isWin: isWin,
+            isVoid: false,
+            isPartialSequence: false,
+            sequenceDetails: sequenceDetail,
+            capitalAfter: newCapital,
+            eventsLeft: nextEventsLeft,
+            winsLeft: nextWinsLeft,
+            timestamp: new Date().toISOString(),
+            quota: activeQuota,
+            snapshot: createSnapshot(currentPlan)
+        };
+
+        const updatedPlan: MasaPlan = {
+            ...currentPlan,
+            currentCapital: newCapital,
+            events: [...currentPlan.events, newEvent],
+            remainingEvents: nextEventsLeft,
+            remainingWins: nextWinsLeft,
+            wins: isWin ? currentPlan.wins + 1 : currentPlan.wins,
+            losses: isWin ? currentPlan.losses : currentPlan.losses + 1,
+            currentConsecutiveLosses: isWin ? 0 : (currentPlan.currentConsecutiveLosses || 0) + 1,
+            maxNetProfit: calculateMaxNetProfit(
+                newCapital,
+                nextEventsLeft,
+                nextWinsLeft,
+                currentPlan.quota,
+                currentPlan.maxConsecutiveLosses || 0
+            )
+        };
+
+        checkPlanStatus(updatedPlan);
     };
 
     const handleBreakEven = () => {
@@ -381,7 +562,8 @@ export const useMasaniello = () => {
             winsLeft: currentPlan.remainingWins,
             timestamp: new Date().toISOString(),
             quota: currentPlan.quota,
-            message: 'BREAK EVEN'
+            message: 'BREAK EVEN',
+            snapshot: createSnapshot(currentPlan)
         };
 
         setCurrentPlan({
@@ -404,7 +586,8 @@ export const useMasaniello = () => {
             winsLeft: isWinEquivalent ? Math.max(0, currentPlan.remainingWins - 1) : currentPlan.remainingWins,
             timestamp: new Date().toISOString(),
             quota: currentPlan.quota,
-            message: amount >= 0 ? `USCITA PARZIALE (+€${amount})` : `PERDITA PARZIALE (-€${Math.abs(amount)})`
+            message: amount >= 0 ? `USCITA PARZIALE (+€${amount})` : `PERDITA PARZIALE (-€${Math.abs(amount)})`,
+            snapshot: createSnapshot(currentPlan)
         };
 
         setCurrentPlan({
@@ -420,11 +603,12 @@ export const useMasaniello = () => {
     };
 
 
-    const activateRescueMode = (eventsToAdd: number, customTarget?: number, winsToAdd: number = 0, extraCapital: number = 0) => {
+    const activateRescueMode = (eventsToAdd: number, customTarget?: number, winsToAdd: number = 0, extraCapital: number = 0, newMaxLosses?: number) => {
         if (!currentPlan) return;
 
         const injected = Number(extraCapital);
         const newCapital = roundTwo(currentPlan.currentCapital + injected);
+        const effectiveMaxLosses = newMaxLosses !== undefined ? newMaxLosses : (currentPlan.maxConsecutiveLosses || 0);
 
         const rescueEventLog: MasaEvent = {
             id: `RESCUE_${Date.now()}`,
@@ -438,7 +622,8 @@ export const useMasaniello = () => {
             eventsLeft: currentPlan.remainingEvents + eventsToAdd,
             winsLeft: currentPlan.remainingWins + winsToAdd,
             timestamp: new Date().toISOString(),
-            quota: currentPlan.quota
+            quota: currentPlan.quota,
+            snapshot: createSnapshot(currentPlan)
         };
 
         const newTarget = customTarget || (
@@ -449,7 +634,7 @@ export const useMasaniello = () => {
                     currentPlan.remainingEvents + eventsToAdd,
                     currentPlan.remainingWins + winsToAdd,
                     currentPlan.quota,
-                    currentPlan.maxConsecutiveLosses || 0
+                    effectiveMaxLosses
                 ))
         );
 
@@ -467,17 +652,104 @@ export const useMasaniello = () => {
             isRescued: true,
             events: [...currentPlan.events, rescueEventLog],
             currentConsecutiveLosses: 0, // Reset CL on rescue reset logic
+            maxConsecutiveLosses: effectiveMaxLosses
         });
     };
+
+
 
     const resetAll = () => {
         setHistory([]);
         setCurrentPlan(null);
-        setSequence([]);
-        setIsSequenceActive(false);
+    };
+
+    const updatePlanStartCapital = (newStartCapital: number) => {
+        if (!currentPlan) return;
+
+        // Recalculate metrics based on new start capital
+        const maxNetProfit = calculateMaxNetProfit(
+            newStartCapital,
+            currentPlan.totalEvents,
+            currentPlan.expectedWins,
+            currentPlan.quota,
+            currentPlan.maxConsecutiveLosses || 0
+        );
+
+        const newTargetCapital = newStartCapital + maxNetProfit;
+        const eventsPlayed = currentPlan.events.filter(e => !e.isSystemLog).length;
+
+        const updatedPlan: MasaPlan = {
+            ...currentPlan,
+            startCapital: newStartCapital,
+            maxNetProfit: maxNetProfit,
+            targetCapital: newTargetCapital,
+            // If no events played, update current capital too
+            currentCapital: eventsPlayed === 0 ? newStartCapital : currentPlan.currentCapital
+        };
+
+        setCurrentPlan(updatedPlan);
+    };
+
+    const updateAbsoluteStartCapital = (newAmount: number) => {
+        // 1. Determine the old start capital (baseline)
+        let oldStart = config.initialCapital;
+        if (history.length > 0) oldStart = history[0].startCapital;
+        else if (currentPlan) oldStart = currentPlan.startCapital;
+
+        if (oldStart <= 0 || newAmount <= 0) return;
+
+        const scaleFactor = newAmount / oldStart;
+
+        // 2. Update Config
+        setConfig(prev => ({ ...prev, initialCapital: newAmount }));
+
+        // 3. Helper to scale a plan
+        const scalePlan = (plan: MasaPlan): MasaPlan => {
+            const scaledEvents = plan.events.map(e => {
+                // Cast to any to access potential dynamic properties if they exist in runtime but not type
+                // or just stick to typed properties to be safe.
+                // Snapshot in MasaEvent is optional.
+                let newSnapshot = e.snapshot;
+                if (newSnapshot && (newSnapshot as any).currentCapital) {
+                    newSnapshot = { ...newSnapshot, currentCapital: roundTwo((newSnapshot as any).currentCapital * scaleFactor) } as any;
+                }
+
+                return {
+                    ...e,
+                    stake: roundTwo(e.stake * scaleFactor),
+                    capitalAfter: roundTwo(e.capitalAfter * scaleFactor),
+                    snapshot: newSnapshot
+                };
+            });
+
+            return {
+                ...plan,
+                startCapital: roundTwo(plan.startCapital * scaleFactor),
+                currentCapital: roundTwo(plan.currentCapital * scaleFactor),
+                targetCapital: roundTwo(plan.targetCapital * scaleFactor),
+                maxNetProfit: roundTwo(plan.maxNetProfit * scaleFactor),
+                accumulatedAmount: plan.accumulatedAmount ? roundTwo(plan.accumulatedAmount * scaleFactor) : 0,
+                events: scaledEvents
+            };
+        };
+
+        // 4. Update History
+        if (history.length > 0) {
+            const newHistory = history.map(scalePlan);
+            setHistory(newHistory);
+        }
+
+        // 5. Update Current Plan
+        if (currentPlan) {
+            const scaledCurrent = scalePlan(currentPlan);
+            setCurrentPlan(scaledCurrent);
+        }
     };
 
     return {
+        plans,
+        activePlanId,
+        setActivePlanId,
         config,
         setConfig,
         currentPlan,
@@ -486,11 +758,11 @@ export const useMasaniello = () => {
         setHistory,
         activeRules,
         toggleRule,
-        sequence,
-        isSequenceActive,
+        toggleAllRules,
         startNewPlan,
         handleFullBet,
-        handlePartialStep,
+        handlePartialWin,
+        handlePartialLoss,
         handleBreakEven,
         handleAdjustment,
         activateRescueMode,
@@ -498,5 +770,8 @@ export const useMasaniello = () => {
         transitionToNextPlan,
         getNextStake,
         getRescueSuggestion: (extraCap?: number) => getRescueSuggestion(currentPlan, extraCap),
+        savePlan,
+        updatePlanStartCapital,
+        updateAbsoluteStartCapital
     };
 };

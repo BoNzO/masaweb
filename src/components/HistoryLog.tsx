@@ -1,6 +1,8 @@
 import React from 'react';
 import { ChevronDown, ChevronUp, LifeBuoy } from 'lucide-react';
 import type { MasaPlan } from '../types/masaniello';
+import { generateCSV, downloadCSV } from '../utils/exportUtils';
+import { Download } from 'lucide-react';
 
 interface HistoryLogProps {
     history: MasaPlan[];
@@ -40,6 +42,16 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ history, expandedHistory, setEx
                                 <div className="text-right">
                                     <div className={`font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{profit >= 0 ? '+' : ''}€{profit.toFixed(2)}</div>
                                     <div className="text-xs text-slate-400">{plan.triggeredRule || plan.status}</div>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const csv = generateCSV(plan);
+                                            downloadCSV(csv, `masa_log_${plan.id}.csv`);
+                                        }}
+                                        className="mt-1 flex items-center gap-1 text-[10px] bg-slate-800 hover:bg-slate-900 border border-slate-600 px-2 py-1 rounded text-slate-300 transition-colors"
+                                    >
+                                        <Download size={10} /> CSV
+                                    </button>
                                 </div>
                             </div>
                             {isExpanded && plan.events && (

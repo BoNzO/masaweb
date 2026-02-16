@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, PiggyBank, Calculator, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Settings, PiggyBank, Calculator, AlertTriangle, TrendingUp, RotateCcw } from 'lucide-react';
 import type { Config } from '../types/masaniello';
 import { roundTwo, calculateMaxNetProfit } from '../utils/mathUtils';
 
@@ -7,9 +7,10 @@ interface ConfigurationPanelProps {
     config: Config;
     setConfig: (config: Config) => void;
     onStart: () => void;
+    suggestedTarget?: number;
 }
 
-const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConfig, onStart }) => {
+const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConfig, onStart, suggestedTarget }) => {
     const previewProfit = calculateMaxNetProfit(
         config.initialCapital,
         config.totalEvents,
@@ -25,6 +26,36 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                 <Settings size={20} /> Configurazione
             </h2>
+
+            {/* ANTEPRIMA RENDIMENTO (SPOSTATO IN ALTO) */}
+            <div className="sticky top-0 z-50 mb-6 p-4 bg-slate-900/95 backdrop-blur-md border border-indigo-500/30 rounded-lg shadow-xl animate-in slide-in-from-top-2 transition-all">
+                <h3 className="text-sm font-bold text-indigo-300 mb-3 flex items-center gap-2">
+                    <Calculator size={16} /> Anteprima Rendimento (Singolo Ciclo)
+                </h3>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                        <div className="text-xs text-slate-400">Capitale Target</div>
+                        <div className="font-bold text-green-400">
+                            €{isNaN(previewTarget) ? '---' : roundTwo(previewTarget).toFixed(2)}
+                            {suggestedTarget && (
+                                <div className="text-[10px] text-slate-400 mt-1 font-normal opacity-80">
+                                    Suggerito: €{roundTwo(suggestedTarget).toFixed(2)}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-xs text-slate-400">Utile Netto</div>
+                        <div className="font-bold text-green-400">
+                            €{isNaN(previewProfit) ? '---' : roundTwo(previewProfit).toFixed(2)}
+                        </div>
+                    </div>
+                    <div>
+                        <div className="text-xs text-slate-400">Rendimento %</div>
+                        <div className="font-bold text-indigo-400">{isNaN(previewROI) ? '---' : roundTwo(previewROI).toFixed(2)}%</div>
+                    </div>
+                </div>
+            </div>
             <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm text-slate-400 mb-1">Capitale Iniziale</label>
@@ -78,161 +109,141 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
                         = €{((config.weeklyTargetPercentage / 100) * config.initialCapital).toFixed(2)} sul capitale iniziale
                     </div>
                 </div>
-                <div className="col-span-2 bg-indigo-900/20 p-3 rounded border border-indigo-500/20">
-                    <label className="block text-sm text-indigo-300 mb-2 font-bold flex items-center gap-2">
-                        <PiggyBank size={16} /> Percentuale Accantonamento (fine ciclo)
-                    </label>
-                    <div className="flex items-center gap-4">
-                        <input
-                            type="range"
-                            min="0"
-                            max="50"
-                            step="5"
-                            value={config.accumulationPercent}
-                            onChange={(e) => setConfig({ ...config, accumulationPercent: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                        />
-                        <span className="font-bold w-16 text-right text-indigo-400">{config.accumulationPercent}%</span>
-                    </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                        Percentuale calcolata sul capitale finale. <br />
-                        <span className="text-yellow-500">
-                            Nota: L'accantonamento è limitato al solo utile netto. Il nuovo ciclo non partirà mai con un importo inferiore al capitale di partenza del ciclo precedente.
-                        </span>
-                    </p>
-                </div>
-                <div className="col-span-2 bg-green-900/20 p-3 rounded border border-green-500/20">
-                    <label className="block text-sm text-green-300 mb-2 font-bold flex items-center gap-2">
-                        <PiggyBank size={16} /> Percentuale Profit Milestone
-                    </label>
-                    <div className="flex items-center gap-4">
-                        <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            step="5"
-                            value={config.milestoneBankPercentage}
-                            onChange={(e) => setConfig({ ...config, milestoneBankPercentage: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                        />
-                        <span className="font-bold w-16 text-right text-green-400">{config.milestoneBankPercentage}%</span>
-                    </div>
-                </div>
-                <div className="col-span-2 bg-red-900/20 p-3 rounded border border-red-500/20">
-                    <label className="block text-sm text-red-300 mb-2 font-bold flex items-center gap-2">
-                        <AlertTriangle size={16} /> Stop-Loss Ciclo: Perdita Massima (%)
-                    </label>
-                    <div className="flex items-center gap-4">
-                        <input
-                            type="range"
-                            min="10"
-                            max="100"
-                            step="5"
-                            value={config.stopLossPercentage}
-                            onChange={(e) => setConfig({ ...config, stopLossPercentage: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                        />
-                        <span className="font-bold w-16 text-right text-red-400">{config.stopLossPercentage}%</span>
+
+                {/* SEZIONE: BANKING & PERFORMANCE */}
+                <div className="col-span-2 mt-4">
+                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <TrendingUp size={14} /> Banking & Crescita
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* BANKING CICLO */}
+                        <div className="bg-indigo-500/5 border border-indigo-500/10 p-4 rounded-2xl hover:bg-indigo-500/10 transition-colors group">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-indigo-500/20 rounded-xl text-indigo-400 group-hover:scale-110 transition-transform">
+                                        <PiggyBank size={18} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-white">Banking Target Settimanale</h4>
+                                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Accantonamento Post-Chiusura</p>
+                                    </div>
+                                </div>
+                                <span className="text-lg font-black text-indigo-400">{config.accumulationPercent}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0"
+                                max="50"
+                                step="5"
+                                value={config.accumulationPercent}
+                                onChange={(e) => setConfig({ ...config, accumulationPercent: parseInt(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-3 leading-relaxed italic">
+                                Quota di utile netto salvata nel "bank" al termine di ogni ciclo vincente.
+                            </p>
+                        </div>
+
+                        {/* PROFITTO INCREMENTALE */}
+                        <div className="bg-emerald-500/5 border border-emerald-500/10 p-4 rounded-2xl hover:bg-emerald-500/10 transition-colors group">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-emerald-500/20 rounded-xl text-emerald-400 group-hover:scale-110 transition-transform">
+                                        <TrendingUp size={18} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-white">Banking Progressivo</h4>
+                                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Accantonamento Milestone</p>
+                                    </div>
+                                </div>
+                                <span className="text-lg font-black text-emerald-400">{config.milestoneBankPercentage}%</span>
+                            </div>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="5"
+                                value={config.milestoneBankPercentage}
+                                onChange={(e) => setConfig({ ...config, milestoneBankPercentage: parseInt(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-3 leading-relaxed italic">
+                                Accantona profitto ogni volta che il guadagno totale raggiunge un multiplo del capitale.
+                            </p>
+                        </div>
                     </div>
                 </div>
 
-                <div className="col-span-2 bg-blue-900/20 p-3 rounded border border-blue-500/20">
-                    <label className="block text-sm text-blue-300 mb-2 font-bold flex items-center gap-2">
-                        <TrendingUp size={16} /> Trailing Profit Stop (Lock Gains)
-                    </label>
+                {/* SEZIONE: RISK & SAFETY */}
+                <div className="col-span-2 mt-6">
+                    <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                        <AlertTriangle size={14} /> Rischio & Protezione
+                    </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <div className="flex justify-between items-center mb-1">
-                                <label className="text-[10px] uppercase font-bold text-slate-400">Attivazione (% Profitto Max)</label>
-                                <span className="text-xs font-bold text-blue-400">{config.trailingProfitActivation || 30}%</span>
+                        {/* EXIT DI SICUREZZA */}
+                        <div className="bg-rose-500/5 border border-rose-500/10 p-4 rounded-2xl hover:bg-rose-500/10 transition-colors group">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-rose-500/20 rounded-xl text-rose-400 group-hover:scale-110 transition-transform">
+                                        <AlertTriangle size={18} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-white">Exit di Sicurezza</h4>
+                                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Stop-Loss Ciclo</p>
+                                    </div>
+                                </div>
+                                <span className="text-lg font-black text-rose-400">{config.stopLossPercentage}%</span>
                             </div>
                             <input
                                 type="range"
                                 min="10"
-                                max="90"
+                                max="100"
                                 step="5"
-                                value={config.trailingProfitActivation || 30}
-                                onChange={(e) => setConfig({ ...config, trailingProfitActivation: parseInt(e.target.value) })}
-                                className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                value={config.stopLossPercentage}
+                                onChange={(e) => setConfig({ ...config, stopLossPercentage: parseInt(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
                             />
+                            <p className="text-[10px] text-slate-400 mt-3 leading-relaxed italic">
+                                Chiude il ciclo se la perdita supera questa soglia del capitale iniziale.
+                            </p>
                         </div>
-                        <div>
-                            <div className="flex justify-between items-center mb-1">
-                                <label className="text-[10px] uppercase font-bold text-slate-400">Lock (% Profitto Garantito)</label>
-                                <span className="text-xs font-bold text-blue-400">{config.trailingProfitLock || 10}%</span>
+
+                        {/* LIMITE PERDITE CONSECUTIVE */}
+                        <div className="bg-orange-500/5 border border-orange-500/10 p-4 rounded-2xl hover:bg-orange-500/10 transition-colors group">
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-orange-500/20 rounded-xl text-orange-400 group-hover:scale-110 transition-transform">
+                                        <RotateCcw size={18} />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-white">Red Line</h4>
+                                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Perdite Consecutive Max</p>
+                                    </div>
+                                </div>
+                                <span className="text-lg font-black text-orange-400">{config.maxConsecutiveLosses || 0}</span>
                             </div>
                             <input
                                 type="range"
-                                min="5"
-                                max="80"
-                                step="5"
-                                value={config.trailingProfitLock || 10}
-                                onChange={(e) => setConfig({ ...config, trailingProfitLock: parseInt(e.target.value) })}
-                                className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                min="0"
+                                max="10"
+                                step="1"
+                                value={config.maxConsecutiveLosses || 0}
+                                onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) })}
+                                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500"
                             />
+                            <p className="text-[10px] text-orange-400 mt-3 leading-relaxed italic font-bold">
+                                {config.maxConsecutiveLosses && config.maxConsecutiveLosses > 0
+                                    ? `Il piano tollera fino a ${config.maxConsecutiveLosses} rossi consecutivi.`
+                                    : "Nessun limite alle perdite consecutive."}
+                            </p>
                         </div>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-2 italic leading-tight">
-                        Esempio: Se raggiungi il {config.trailingProfitActivation || 30}% del profitto massimo atteso, il sistema chiuderà automaticamente il ciclo se il profitto scende sotto il {config.trailingProfitLock || 10}% del massimo, garantendo un guadagno minimo.
-                    </p>
-                </div>
 
-                <div className="col-span-2 bg-slate-700/50 p-3 rounded border border-slate-500/20">
-                    <label className="block text-sm text-slate-300 mb-2 font-bold flex items-center gap-2 uppercase tracking-wider text-[10px]">
-                        <Settings size={14} /> Parametri Avanzati (Masaniello Condizionato)
-                    </label>
-                    <div className="flex flex-col gap-4">
-                        <div>
-                            <div className="flex justify-between items-center mb-1">
-                                <label className="text-xs text-slate-400 font-medium">Max Rossi Consecutivi (0 = Nessun limite)</label>
-                                <span className={`text-xs font-black ${config.maxConsecutiveLosses && config.maxConsecutiveLosses > 0 ? 'text-orange-400' : 'text-slate-500'}`}>
-                                    {config.maxConsecutiveLosses || 0}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="10"
-                                    step="1"
-                                    value={config.maxConsecutiveLosses || 0}
-                                    onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) })}
-                                    className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-orange-500"
-                                />
-                            </div>
-                            {config.maxConsecutiveLosses ? (config.maxConsecutiveLosses > 0 && (
-                                <p className="text-[10px] text-orange-400/70 mt-2 italic leading-tight">
-                                    Attenzione: Se si verificano {config.maxConsecutiveLosses + 1} rossi consecutivi, il piano fallirà istantaneamente.
-                                </p>
-                            )) : null}
-                        </div>
+
                     </div>
                 </div>
             </div>
 
-            <div className="mt-6 p-4 bg-indigo-900/30 border border-indigo-500/30 rounded-lg">
-                <h3 className="text-sm font-bold text-indigo-300 mb-3 flex items-center gap-2">
-                    <Calculator size={16} /> Anteprima Rendimento (Singolo Ciclo)
-                </h3>
-                <div className="grid grid-cols-3 gap-4 text-center">
-                    <div>
-                        <div className="text-xs text-slate-400">Capitale Target</div>
-                        <div className="font-bold text-green-400">
-                            €{isNaN(previewTarget) ? '---' : roundTwo(previewTarget).toFixed(2)}
-                        </div>
-                    </div>
-                    <div>
-                        <div className="text-xs text-slate-400">Utile Netto</div>
-                        <div className="font-bold text-green-400">
-                            €{isNaN(previewProfit) ? '---' : roundTwo(previewProfit).toFixed(2)}
-                        </div>
-                    </div>
-                    <div>
-                        <div className="text-xs text-slate-400">Rendimento %</div>
-                        <div className="font-bold text-indigo-400">{isNaN(previewROI) ? '---' : roundTwo(previewROI).toFixed(2)}%</div>
-                    </div>
-                </div>
-            </div>
+
 
             <button onClick={onStart} className="mt-4 w-full bg-green-600 hover:bg-green-700 py-3 rounded font-bold transition-colors">
                 Avvia Piano
