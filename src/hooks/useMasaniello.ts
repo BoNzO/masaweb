@@ -3,8 +3,19 @@ import type { Config, MasaPlan, MasaEvent, EventSnapshot } from '../types/masani
 import { roundTwo, calculateMaxNetProfit } from '../utils/mathUtils';
 import { calculateStake, getRescueSuggestion } from '../utils/masaLogic';
 
-export const useMasaniello = () => {
+export const useMasaniello = (persist: boolean = true) => {
     const [config, setConfig] = useState<Config>(() => {
+        if (!persist) {
+            return {
+                initialCapital: 1000,
+                quota: 3.0,
+                totalEvents: 13,
+                expectedWins: 3,
+                accumulationPercent: 50,
+                weeklyTargetPercentage: 20,
+                milestoneBankPercentage: 20
+            };
+        }
         const saved = localStorage.getItem('masa_config');
         const defaultConfig: Config = {
             initialCapital: 1000,
@@ -13,13 +24,13 @@ export const useMasaniello = () => {
             expectedWins: 3,
             accumulationPercent: 50,
             weeklyTargetPercentage: 20,
-            milestoneBankPercentage: 20,
-            stopLossPercentage: 100
+            milestoneBankPercentage: 20
         };
         return saved ? { ...defaultConfig, ...JSON.parse(saved) } : defaultConfig;
     });
 
     const [plans, setPlans] = useState<Record<string, MasaPlan>>(() => {
+        if (!persist) return {};
         const saved = localStorage.getItem('masa_plans');
         // Migration: If old 'masa_current_plan' exists, convert it to the new structure
         if (!saved) {
@@ -34,6 +45,7 @@ export const useMasaniello = () => {
     });
 
     const [activePlanId, setActivePlanId] = useState<string | null>(() => {
+        if (!persist) return null;
         const saved = localStorage.getItem('masa_active_plan_id');
         if (saved) return JSON.parse(saved);
         // Fallback: use key of first plan if exists
@@ -62,46 +74,48 @@ export const useMasaniello = () => {
     };
 
     const [history, setHistory] = useState<MasaPlan[]>(() => {
+        if (!persist) return [];
         const saved = localStorage.getItem('masa_history');
         return saved ? JSON.parse(saved) : [];
     });
 
     const [activeRules, setActiveRules] = useState<string[]>(() => {
+        if (!persist) return [
+            'first_win',
+            'back_positive',
+            'auto_bank_100',
+        ];
         const saved = localStorage.getItem('masa_active_rules');
         return saved ? JSON.parse(saved) : [
             'first_win',
             'back_positive',
-            'profit_90',
-            'all_wins',
-            'impossible',
             'auto_bank_100',
             'smart_auto_close',
             'profit_milestone',
-            'stop_loss',
         ];
     });
 
 
 
     useEffect(() => {
-        localStorage.setItem('masa_config', JSON.stringify(config));
-    }, [config]);
+        if (persist) localStorage.setItem('masa_config', JSON.stringify(config));
+    }, [config, persist]);
 
     useEffect(() => {
-        localStorage.setItem('masa_plans', JSON.stringify(plans));
-    }, [plans]);
+        if (persist) localStorage.setItem('masa_plans', JSON.stringify(plans));
+    }, [plans, persist]);
 
     useEffect(() => {
-        localStorage.setItem('masa_active_plan_id', JSON.stringify(activePlanId));
-    }, [activePlanId]);
+        if (persist) localStorage.setItem('masa_active_plan_id', JSON.stringify(activePlanId));
+    }, [activePlanId, persist]);
 
     useEffect(() => {
-        localStorage.setItem('masa_history', JSON.stringify(history));
-    }, [history]);
+        if (persist) localStorage.setItem('masa_history', JSON.stringify(history));
+    }, [history, persist]);
 
     useEffect(() => {
-        localStorage.setItem('masa_active_rules', JSON.stringify(activeRules));
-    }, [activeRules]);
+        if (persist) localStorage.setItem('masa_active_rules', JSON.stringify(activeRules));
+    }, [activeRules, persist]);
 
     const toggleRule = (ruleId: string) => {
         setActiveRules((prev) =>
@@ -342,12 +356,6 @@ export const useMasaniello = () => {
             }
         }
 
-        // 6. Stop Loss
-        const drawdown = (startCap - planState.currentCapital) / startCap;
-        if (activeRules.includes('stop_loss') && drawdown >= config.stopLossPercentage / 100) {
-            transitionToNextPlan(planState, 'stop_loss_triggered', 'stop_loss');
-            return;
-        }
 
         // 7. Rescue Target Reached
         if (planState.isRescued) {
@@ -748,6 +756,7 @@ export const useMasaniello = () => {
 
     return {
         plans,
+        setPlans,
         activePlanId,
         setActivePlanId,
         config,
@@ -757,6 +766,7 @@ export const useMasaniello = () => {
         history,
         setHistory,
         activeRules,
+        setActiveRules,
         toggleRule,
         toggleAllRules,
         startNewPlan,

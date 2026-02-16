@@ -166,3 +166,15 @@ export const getEarlyClosureSuggestion = (
 
     return null;
 };
+
+export const calculateTiltThreshold = (
+    totalEvents: number,
+    expectedWins: number,
+    remainingEvents: number,
+    remainingWins: number
+): number => {
+    const totalAllowedErrors = totalEvents - expectedWins;
+    const structuralLosses = totalAllowedErrors - (remainingEvents - remainingWins);
+    const remainingAllowedErrors = totalAllowedErrors - structuralLosses;
+    return Math.max(2, Math.ceil(remainingAllowedErrors * 0.3));
+};

@@ -8,6 +8,9 @@ interface AnalyticsSectionProps {
     heatmapData: any[]; // Specific heatmap structure
     weeklyTarget: number;
     weeklyTargetPercentage: number;
+    currentCapital: number;
+    startCapital: number;
+    absoluteWeeklyTarget: number;
 }
 
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
@@ -23,7 +26,7 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] 
     return null;
 };
 
-const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ chartData, heatmapData, weeklyTarget, weeklyTargetPercentage }) => {
+const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ chartData, heatmapData, weeklyTarget, weeklyTargetPercentage, currentCapital, startCapital, absoluteWeeklyTarget }) => {
     return (
         <div className="grid grid-cols-1 gap-6">
             <div className={`bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg h-[300px] flex flex-col ${chartData.length <= 1 ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
@@ -49,37 +52,80 @@ const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ chartData, heatmapD
                 </div>
             </div>
 
-            <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg overflow-hidden flex flex-col h-[300px]">
+            <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg overflow-hidden flex flex-col h-[300px] relative">
                 <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
-                    <Target size={16} className="text-green-400" /> Target Weekly €{weeklyTarget.toFixed(2)} ({weeklyTargetPercentage}%)
+                    <Target size={16} className="text-blue-400" /> Target Weekly €{weeklyTarget.toFixed(2)} ({weeklyTargetPercentage}%)
                 </h3>
-                <div className="flex gap-4 flex-1 min-h-0 items-center">
-                    <div className="flex flex-col justify-between h-[150px] text-[10px] text-slate-500 py-1">
-                        <span>100%</span>
-                        <span>80%</span>
-                        <span>60%</span>
-                        <span>40%</span>
-                        <span>20%</span>
-                    </div>
-                    <div className="flex-1 h-[150px]">
-                        <div className="grid grid-cols-12 gap-1 h-full">
-                            {heatmapData.map((week, i) => (
-                                <div key={i} className="flex flex-col justify-between h-full group">
-                                    <div className="flex flex-col h-full gap-0.5">
-                                        {week.data.map((level: any, levelIdx: number) => (
-                                            <div
-                                                key={levelIdx}
-                                                className={`flex-1 rounded-sm transition-all duration-500 ${level.data === 1 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.3)]' : 'bg-white/5'}`}
-                                                title={`${week.key} - ${level.key}`}
-                                            />
-                                        ))}
+
+                <div className="flex-1 flex flex-col items-center justify-center">
+                    {/* Current Week Radial Progress */}
+                    {(() => {
+                        // CALCOLO RELATIVO AL PROFITTO SETTIMANALE:
+                        // Se sono a 1000 e il target è 1250, il progresso è 0% finché non supero 1000.
+                        const totalToGain = absoluteWeeklyTarget - startCapital;
+                        const currentGain = currentCapital - startCapital;
+                        const progress = Math.max(0, Math.min(100, (currentGain / totalToGain) * 100));
+
+                        const completedWeeks = heatmapData.filter(w => w.percentage >= 99.9).length;
+
+                        return (
+                            <div className="relative flex flex-col items-center">
+                                {/* SVG Radial Gauge */}
+                                <div className="relative w-40 h-40">
+                                    <svg className="w-full h-full -rotate-90">
+                                        {/* Background Circle */}
+                                        <circle
+                                            cx="80"
+                                            cy="80"
+                                            r="70"
+                                            className="stroke-slate-700 fill-none"
+                                            strokeWidth="8"
+                                        />
+                                        {/* Progress Circle with Glow */}
+                                        <circle
+                                            cx="80"
+                                            cy="80"
+                                            r="70"
+                                            className="stroke-blue-500 fill-none transition-all duration-1000 ease-out"
+                                            strokeWidth="8"
+                                            strokeDasharray={440}
+                                            strokeDashoffset={440 - (440 * progress) / 100}
+                                            strokeLinecap="round"
+                                            style={{ filter: 'drop-shadow(0 0 6px rgba(59, 130, 246, 0.5))' }}
+                                        />
+                                    </svg>
+
+                                    {/* Center Text */}
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span className="text-3xl font-black text-white">{Math.round(progress)}%</span>
+                                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                            €{(absoluteWeeklyTarget - currentCapital).toFixed(2)} mancanti
+                                        </span>
                                     </div>
-                                    <div className="text-[10px] text-slate-500 text-center mt-1 group-hover:text-slate-300 transition-colors">S{i + 1}</div>
                                 </div>
-                            ))}
-                        </div>
-                    </div>
+
+                                {/* Milestone Steps (Minimalist) */}
+                                <div className="flex gap-1.5 mt-6">
+                                    {heatmapData.map((week, i) => (
+                                        <div
+                                            key={i}
+                                            className={`w-3 h-1.5 rounded-full transition-all duration-500 ${week.percentage >= 99.9
+                                                ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
+                                                : i === completedWeeks
+                                                    ? 'bg-slate-500 animate-pulse'
+                                                    : 'bg-slate-700'
+                                                }`}
+                                            title={`Level ${i + 1}: ${Math.round(week.percentage)}%`}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
+
+                {/* Background Decorative Element */}
+                <Target className="absolute -bottom-6 -right-6 text-blue-500/5 w-32 h-32 pointer-events-none" />
             </div>
         </div>
     );

@@ -9,7 +9,7 @@ interface DebugRulesProps {
 }
 
 const DebugRules: React.FC<DebugRulesProps> = ({ plan, activeRules, config }) => {
-    const [isVisible, setIsVisible] = React.useState(true);
+    const [isVisible, setIsVisible] = React.useState(false);
 
     if (!isVisible) {
         return (
@@ -25,11 +25,11 @@ const DebugRules: React.FC<DebugRulesProps> = ({ plan, activeRules, config }) =>
     // Calculate values exactly as they are in checkPlanStatus
     // Target is now an ABSOLUTE CAPITAL VALUE (e.g. 1200)
     const absoluteTarget = plan.currentWeeklyTarget ?? (plan.startCapital * (1 + config.weeklyTargetPercentage / 100));
-    const isAutoBankTriggered = activeRules.includes('auto_bank_100') && plan.currentCapital >= absoluteTarget && (plan.currentCapital - plan.startCapital) > 0;
+    const isAutoBankTriggered = activeRules.includes('auto_bank_100') && plan.currentCapital >= absoluteTarget - 0.01;
 
     const totalWorth = plan.currentCapital; // Simplified for this view, doesn't need history
     const currentMilestone = Math.floor(totalWorth / config.initialCapital);
-    const isMilestoneTriggered = activeRules.includes('profit_milestone') && currentMilestone > (plan.profitMilestoneReached || 0) && currentMilestone > 0;
+    const isMilestoneTriggered = activeRules.includes('profit_milestone') && currentMilestone > (plan.profitMilestoneReached || 0) && currentMilestone > 1;
 
     return (
         <div className="p-4 bg-black/80 text-xs font-mono text-green-400 fixed bottom-0 right-0 z-50 border-t-2 border-green-500 w-full max-h-64 overflow-auto">

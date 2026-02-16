@@ -6,9 +6,7 @@ export interface Config {
   accumulationPercent: number;
   weeklyTargetPercentage: number;
   milestoneBankPercentage: number;
-  stopLossPercentage: number;
   maxConsecutiveLosses?: number;
-
 }
 
 export interface EventDetail {
@@ -67,6 +65,7 @@ export interface MasaPlan {
   createdAt: string;
   generationNumber: number;
   currentWeeklyTarget?: number;
+  startWeeklyBaseline?: number;
   milestonesBanked?: number;
   profitMilestoneReached?: number;
   maxConsecutiveLosses?: number;
@@ -88,4 +87,58 @@ export interface ChartDataPoint {
 export interface Rule {
   id: string;
   label: string;
+}
+
+// Multi-Masaniello System Types
+
+export interface MasanielloInstance {
+  id: string; // "masa_1", "masa_2", "masa_3"
+  number: number; // 1, 2, 3
+  name: string; // "Masaniello #1", "Masaniello #2", "Masaniello #3"
+  status: 'active' | 'archived';
+  config: Config;
+  activeRules: string[];
+  currentPlan: MasaPlan | null;
+  history: MasaPlan[];
+  absoluteStartCapital: number;
+  createdAt: string;
+  archivedAt?: string;
+}
+
+export interface CapitalPool {
+  totalAvailable: number;
+  allocations: {
+    [masaId: string]: number; // Amount allocated to each Masaniello
+  };
+  history: CapitalPoolTransaction[];
+}
+
+export interface CapitalPoolTransaction {
+  id: string;
+  timestamp: string;
+  type: 'allocation' | 'release' | 'transfer';
+  amount: number;
+  fromMasaId?: string;
+  toMasaId?: string;
+  description: string;
+}
+
+export interface MultiMasaState {
+  instances: {
+    [id: string]: MasanielloInstance;
+  };
+  capitalPool: CapitalPool;
+  activeInstanceIds: string[]; // Max 3
+  archivedInstanceIds: string[];
+  currentViewId: string | null; // Currently selected tab
+}
+
+export interface AggregatedStats {
+  totalWorth: number; // Sum of all active Masaniello capitals + banked
+  totalBanked: number; // Sum of all banked amounts
+  totalProfit: number;
+  totalGrowth: number;
+  totalWins: number;
+  totalLosses: number;
+  combinedChartData: ChartDataPoint[];
 }

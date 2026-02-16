@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { generateCSV, downloadCSV } from '../utils/exportUtils';
 import type { MasaPlan, Rule } from '../types/masaniello';
-import { getEarlyClosureSuggestion } from '../utils/masaLogic';
+import { getEarlyClosureSuggestion, calculateTiltThreshold } from '../utils/masaLogic';
 import { calculateMaxNetProfit } from '../utils/mathUtils';
 import DebugRules from './DebugRules';
 
@@ -106,8 +106,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
 
 
     const totalAllowedErrors = currentPlan.totalEvents - currentPlan.expectedWins;
-    const remainingAllowedErrors = totalAllowedErrors - structuralLosses;
-    const tiltThreshold = Math.max(2, Math.ceil(remainingAllowedErrors * 0.3));
+    const tiltThreshold = calculateTiltThreshold(currentPlan.totalEvents, currentPlan.expectedWins, currentPlan.remainingEvents, currentPlan.remainingWins);
     const isCritical = structuralLosses >= totalAllowedErrors * 0.8 && totalAllowedErrors > 0;
     const isRescueNeededAfterWins = currentPlan.isRescued && currentPlan.remainingWins === 0 && currentPlan.currentCapital < currentPlan.startCapital - 0.01;
 

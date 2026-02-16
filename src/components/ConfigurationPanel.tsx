@@ -179,35 +179,7 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
                     <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
                         <AlertTriangle size={14} /> Rischio & Protezione
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* EXIT DI SICUREZZA */}
-                        <div className="bg-rose-500/5 border border-rose-500/10 p-4 rounded-2xl hover:bg-rose-500/10 transition-colors group">
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-rose-500/20 rounded-xl text-rose-400 group-hover:scale-110 transition-transform">
-                                        <AlertTriangle size={18} />
-                                    </div>
-                                    <div>
-                                        <h4 className="text-sm font-bold text-white">Exit di Sicurezza</h4>
-                                        <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Stop-Loss Ciclo</p>
-                                    </div>
-                                </div>
-                                <span className="text-lg font-black text-rose-400">{config.stopLossPercentage}%</span>
-                            </div>
-                            <input
-                                type="range"
-                                min="10"
-                                max="100"
-                                step="5"
-                                value={config.stopLossPercentage}
-                                onChange={(e) => setConfig({ ...config, stopLossPercentage: parseInt(e.target.value) })}
-                                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-500"
-                            />
-                            <p className="text-[10px] text-slate-400 mt-3 leading-relaxed italic">
-                                Chiude il ciclo se la perdita supera questa soglia del capitale iniziale.
-                            </p>
-                        </div>
-
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-center">
                         {/* LIMITE PERDITE CONSECUTIVE */}
                         <div className="bg-orange-500/5 border border-orange-500/10 p-4 rounded-2xl hover:bg-orange-500/10 transition-colors group">
                             <div className="flex justify-between items-start mb-4">
