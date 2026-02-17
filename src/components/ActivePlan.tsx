@@ -46,7 +46,6 @@ interface ActivePlanProps {
     } | null;
     onUpdatePlan: (newPlan: MasaPlan) => void;
     onUpdateStartCapital: (newAmount: number) => void;
-    config: any;
 }
 
 const ActivePlan: React.FC<ActivePlanProps> = ({
@@ -66,7 +65,6 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     getNextStake,
     getRescueSuggestion,
     onUpdateStartCapital,
-    config
 }) => {
     const [rescueEventsToAdd, setRescueEventsToAdd] = useState(2);
     const [rescueWinsToAdd, setRescueWinsToAdd] = useState(0);
@@ -462,7 +460,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 </div>
 
                 {/* Main Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative z-10">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 relative z-10">
                     {/* Start Capital */}
                     <div className="bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-slate-600/50 transition-colors group/start">
                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1 flex justify-between items-center">
@@ -497,9 +495,6 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                         </div>
                         <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex justify-between items-center">
                             Capitale Attuale
-                            <span className={`text-[10px] font-black ${currentPlan.currentCapital >= currentPlan.startCapital ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? '+' : ''}€{(currentPlan.currentCapital - currentPlan.startCapital).toFixed(2)}
-                            </span>
                         </div>
                         <div className="text-xl font-bold tracking-tight text-[#F84AA7]">
                             €{currentPlan.currentCapital.toFixed(2)}
@@ -510,6 +505,14 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     <div className="bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-blue-500/20 transition-colors group/target">
                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1 group-hover/target:text-blue-400 transition-colors">Target Finale</div>
                         <div className="text-xl font-bold text-blue-400 group-hover/target:text-blue-300 transition-colors">€{currentPlan.targetCapital.toFixed(2)}</div>
+                    </div>
+
+                    {/* Current Profit (New Card) */}
+                    <div className={`bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-slate-600/50 transition-colors group/profit ${(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? 'hover:border-green-500/30' : 'hover:border-red-500/30'}`}>
+                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Profitto Attuale</div>
+                        <div className={`text-xl font-bold ${(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? '+' : ''}€{(currentPlan.currentCapital - currentPlan.startCapital).toFixed(2)}
+                        </div>
                     </div>
                 </div>
 
@@ -651,35 +654,39 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
 
                 {/* LEFT: NEXT BET CARD */}
                 <div
-                    className="p-6 rounded-2xl shadow-2xl relative overflow-hidden transition-all duration-500 group bg-gradient-to-br from-blue-600 to-blue-800 border-2 border-white/10 flex flex-col justify-center"
+                    className="p-6 rounded-2xl shadow-2xl relative overflow-hidden transition-all duration-500 group bg-gradient-to-br from-blue-600 to-blue-800 border-2 border-white/10 flex flex-col justify-between h-full"
                 >
                     <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="flex items-center justify-between relative z-10">
-                        <div className="space-y-1">
-                            <div className="text-xs text-blue-100/70 font-bold uppercase tracking-widest flex items-center gap-2">
-                                <RefreshCw size={12} />
-                                Prossimo Step
-                            </div>
-                            <h3 className="text-3xl font-black text-white tracking-tight">
-                                Puntata
-                            </h3>
+
+                    {/* Top Row: Next Step (Left) & Quota (Right) */}
+                    <div className="flex items-start justify-between relative z-10 mb-8">
+                        {/* Left: Next Step */}
+                        <div className="text-xs text-blue-100/70 font-bold uppercase tracking-widest flex items-center gap-2">
+                            <RefreshCw size={12} />
+                            Prossimo Step
                         </div>
 
-                        <div className="flex flex-col items-end">
-                            <div className="flex items-center gap-2 mb-2 bg-black/20 px-3 py-1.5 rounded-lg border border-white/10">
-                                <span className="text-[10px] uppercase font-bold text-white/60">Quota</span>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={currentQuota}
-                                    onChange={(e) => setCurrentQuota(Number(e.target.value))}
-                                    className="w-12 bg-transparent text-right font-black text-white text-sm outline-none"
-                                />
-                            </div>
-                            <div className="flex items-baseline gap-1">
-                                <span className="text-2xl text-blue-200 font-medium">€</span>
-                                <span className="text-5xl font-black text-white tracking-tighter drop-shadow-xl">{displayStake.toFixed(2)}</span>
-                            </div>
+                        {/* Right: Quota */}
+                        <div className="flex items-center gap-2 bg-black/20 px-3 py-1.5 rounded-lg border border-white/10">
+                            <span className="text-[10px] uppercase font-bold text-white/60">Quota</span>
+                            <input
+                                type="number"
+                                step="0.01"
+                                value={currentQuota}
+                                onChange={(e) => setCurrentQuota(Number(e.target.value))}
+                                className="w-12 bg-transparent text-right font-black text-white text-sm outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Bottom Row: Stake */}
+                    <div className="relative z-10">
+                        <div className="text-sm font-medium text-blue-200 mb-1">
+                            Puntata
+                        </div>
+                        <div className="flex items-baseline gap-1">
+                            <span className="text-2xl text-blue-200 font-medium">€</span>
+                            <span className="text-5xl font-black text-white tracking-tighter drop-shadow-xl">{displayStake.toFixed(2)}</span>
                         </div>
                     </div>
                 </div>

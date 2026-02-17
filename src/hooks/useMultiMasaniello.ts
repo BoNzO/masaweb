@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useMasaniello } from './useMasaniello';
 import type {
     MasanielloInstance,
     MultiMasaState,
@@ -7,8 +6,7 @@ import type {
     CapitalPoolTransaction,
     AggregatedStats,
     Config,
-    ChartDataPoint,
-    MasaPlan
+    ChartDataPoint
 } from '../types/masaniello';
 
 const STORAGE_KEY = 'multi_masaniello_state';
@@ -48,7 +46,7 @@ export const useMultiMasaniello = () => {
     }, [multiState]);
 
     // Create a new Masaniello instance
-    const createMasaniello = useCallback((config: Config, initialCapital?: number) => {
+    const createMasaniello = useCallback((config: Config, initialCapital?: number, activeRules?: string[]) => {
         setMultiState(prev => {
             if (prev.activeInstanceIds.length >= MAX_ACTIVE_INSTANCES) {
                 alert(`Puoi avere massimo ${MAX_ACTIVE_INSTANCES} Masanielli attivi. Archivia uno prima di crearne uno nuovo.`);
@@ -77,7 +75,7 @@ export const useMultiMasaniello = () => {
                 name: `Masaniello #${nextNumber}`,
                 status: 'active',
                 config,
-                activeRules: ['first_win', 'back_positive', 'auto_bank_100'],
+                activeRules: activeRules || ['first_win', 'back_positive', 'auto_bank_100'],
                 currentPlan: null,
                 history: [],
                 absoluteStartCapital: capitalToAllocate,
@@ -160,6 +158,22 @@ export const useMultiMasaniello = () => {
                 activeInstanceIds: prev.activeInstanceIds.filter(id => id !== masaId),
                 archivedInstanceIds: [...prev.archivedInstanceIds, masaId],
                 currentViewId: 'new' // Switch to new Masaniello creation
+            };
+        });
+    }, []);
+
+    // Delete a Masaniello instance (permanently)
+    const deleteMasaniello = useCallback((masaId: string) => {
+        setMultiState(prev => {
+            const newInstances = { ...prev.instances };
+            delete newInstances[masaId];
+
+            return {
+                ...prev,
+                instances: newInstances,
+                activeInstanceIds: prev.activeInstanceIds.filter(id => id !== masaId),
+                archivedInstanceIds: prev.archivedInstanceIds.filter(id => id !== masaId),
+                currentViewId: prev.currentViewId === masaId ? 'overview' : prev.currentViewId
             };
         });
     }, []);
@@ -330,6 +344,7 @@ export const useMultiMasaniello = () => {
         multiState,
         createMasaniello,
         archiveMasaniello,
+        deleteMasaniello,
         cloneMasaniello,
         addCapitalToPool,
         updateInstance,

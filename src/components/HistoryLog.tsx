@@ -32,7 +32,7 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ history, expandedHistory, setEx
                                         {plan.isRescued && <LifeBuoy size={14} className="text-orange-400" />}
                                     </div>
                                     <div className="text-xs text-slate-400">
-                                        {plan.wins}V / {plan.losses}L
+                                        {plan.wins}V / {plan.losses}L • {Math.ceil((plan.wins + plan.losses) / 2.5)} GG
                                     </div>
                                     <div className="text-xs text-slate-300 bg-slate-800/50 px-2 py-1 rounded inline-block">
                                         €{plan.startCapital.toFixed(2)} → €{plan.currentCapital.toFixed(2)}

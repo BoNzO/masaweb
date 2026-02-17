@@ -14,6 +14,7 @@ const App = () => {
     multiState,
     createMasaniello,
     archiveMasaniello,
+    deleteMasaniello,
     cloneMasaniello,
     addCapitalToPool,
     updateInstance,
@@ -43,6 +44,10 @@ const App = () => {
   const handleArchiveInstance = React.useCallback((id: string) => {
     archiveMasaniello(id);
   }, [archiveMasaniello]);
+
+  const handleDeleteInstance = React.useCallback((id: string) => {
+    deleteMasaniello(id);
+  }, [deleteMasaniello]);
 
   const handleCloneInstance = React.useCallback((id: string) => {
     cloneMasaniello(id);
@@ -83,7 +88,6 @@ const App = () => {
       <MasanielloTabs
         instances={multiState.instances}
         activeIds={multiState.activeInstanceIds}
-        archivedIds={multiState.archivedInstanceIds}
         currentViewId={currentView}
         onSelectView={setCurrentView}
         canCreateNew={canCreateNew}
@@ -108,7 +112,10 @@ const App = () => {
             instance={currentInstance}
             onUpdate={(updates) => handleUpdateInstance(currentInstance.id, updates)}
             onArchive={() => handleArchiveInstance(currentInstance.id)}
+            onDelete={handleDeleteInstance}
             onClone={() => handleCloneInstance(currentInstance.id)}
+            archivedInstances={multiState.archivedInstanceIds.map(id => multiState.instances[id]).filter(Boolean)}
+            onSelectInstance={setCurrentView}
           />
         )}
       </div>

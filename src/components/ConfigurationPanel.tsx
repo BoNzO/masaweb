@@ -8,9 +8,21 @@ interface ConfigurationPanelProps {
     setConfig: (config: Config) => void;
     onStart: () => void;
     suggestedTarget?: number;
+    activeRules?: string[];
+    toggleRule?: (ruleId: string) => void;
+    toggleAllRules?: (ruleIds: string[]) => void;
 }
 
-const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConfig, onStart, suggestedTarget }) => {
+const AVAILABLE_RULES = [
+    { id: 'auto_bank_100', label: 'Banking Target Settimanale', desc: 'Incassa % profitto al raggiungimento del target' },
+    { id: 'profit_milestone', label: 'Banking Progressivo (Milestone)', desc: 'Incassa % profitto ogni volta che raddoppi il capitale' },
+    { id: 'smart_auto_close', label: 'Smart Auto Close', desc: 'Chiudi in pari se possibile dopo sequenza negativa' },
+    { id: 'stop_loss', label: 'Stop Loss', desc: 'Interrompi il piano se raggiungi il limite di perdite consecutive' },
+    { id: 'first_win', label: 'Prima Vittoria Garantita (Bonus)', desc: 'Rimuovi rischio iniziale dopo prima vittoria' },
+    { id: 'back_positive', label: 'Torna in Positivo', desc: 'Regola dinamica per recupero rapido' }
+];
+
+const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConfig, onStart, suggestedTarget, activeRules, toggleRule, toggleAllRules }) => {
     const previewProfit = calculateMaxNetProfit(
         config.initialCapital,
         config.totalEvents,
@@ -213,6 +225,61 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
 
                     </div>
                 </div>
+
+                {/* SEZIONE: REGOLE ATTIVE (Se supportate) */}
+                {activeRules && toggleRule && (
+                    <div className="col-span-2 mt-6 border-t border-slate-700 pt-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                                Regole Attive
+                            </h3>
+                            {toggleAllRules && (
+                                <button
+                                    onClick={() => {
+                                        if (activeRules.length === AVAILABLE_RULES.length) {
+                                            toggleAllRules([]);
+                                        } else {
+                                            toggleAllRules(AVAILABLE_RULES.map(r => r.id));
+                                        }
+                                    }}
+                                    className="text-[10px] uppercase font-bold text-slate-500 hover:text-blue-400 transition-colors"
+                                >
+                                    {activeRules.length === AVAILABLE_RULES.length ? 'Disattiva Tutti' : 'Attiva Tutti'}
+                                </button>
+                            )}
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {AVAILABLE_RULES.map(rule => (
+                                <div
+                                    key={rule.id}
+                                    onClick={() => toggleRule(rule.id)}
+                                    className={`
+                                        p-3 rounded-lg border cursor-pointer transition-all flex items-start gap-3
+                                        ${activeRules.includes(rule.id)
+                                            ? 'bg-blue-500/20 border-blue-500/50'
+                                            : 'bg-slate-700/30 border-slate-600 opacity-60 hover:opacity-100'}
+                                    `}
+                                >
+                                    <div className={`
+                                        w-5 h-5 rounded border flex items-center justify-center shrink-0 mt-0.5
+                                        ${activeRules.includes(rule.id) ? 'bg-blue-500 border-blue-500' : 'border-slate-500'}
+                                    `}>
+                                        {activeRules.includes(rule.id) && <span className="text-white text-xs font-bold">✓</span>}
+                                    </div>
+                                    <div>
+                                        <div className={`text-xs font-bold ${activeRules.includes(rule.id) ? 'text-blue-100' : 'text-slate-400'}`}>
+                                            {rule.label}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 leading-tight mt-1">
+                                            {rule.desc}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
             </div>
 
 
@@ -220,7 +287,7 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({ config, setConf
             <button onClick={onStart} className="mt-4 w-full bg-green-600 hover:bg-green-700 py-3 rounded font-bold transition-colors">
                 Avvia Piano
             </button>
-        </div>
+        </div >
     );
 };
 

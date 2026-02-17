@@ -123,7 +123,20 @@ User Input → useMasaniello Hook → State Management → UI Components
 - **Capitale Obiettivo**: Target di profitto del piano
 - **Max Net Profit**: Massimo profitto teorico raggiungibile
 
-### 2. **Registrazione Eventi**
+### 2. **Gestione Multi-Masaniello & Archiviazione**
+
+#### Multi-Masaniello
+- **Piani Multipli**: Gestisci diversi piani Masaniello contemporaneamente in schede separate.
+- **Capital Pool Condiviso**: Visualizza il patrimonio totale aggregato di tutti i piani attivi.
+- **Navigazione a Tab**: Passa rapidamente da un piano all'altro.
+- **Sincronizzazione Real-Time**: Le modifiche effettuate in una scheda vengono immediatamente riflesse in tutte le altre finestre aperte.
+
+#### Archiviazione
+- **Storico Piani**: Archivia i piani completati o abbandonati per mantenere pulita la dashboard.
+- **Consultazione**: Accedi ai dettagli dei piani archiviati in qualsiasi momento.
+- **Eliminazione**: Rimuovi definitivamente i piani archiviati non più necessari.
+
+### 3. **Registrazione Eventi**
 
 #### Tipi di Evento
 1. **Vittoria Completa**: Scommessa vinta con stake pieno
@@ -147,7 +160,13 @@ Quando il capitale scende sotto il livello iniziale, si attiva la **Rescue Mode*
 - **Indicatore Visivo**: Badge arancione "RESCUE MODE"
 - **Uscita**: Quando si raggiunge il 90% del capitale iniziale
 
-### 4. **Sistema di Generazioni**
+#### Rescue Calculator (Anti-Tilt)
+Uno strumento avanzato per pianificare il recupero:
+- **Simulazione**: Proietta il nuovo target modificando eventi e vittorie aggiuntivi (+1/+10 eventi, +0/+5 vittorie).
+- **Controllo Granulare**: Definisci esattamente come estendere il piano per renderlo recuperabile.
+- **Anteprima Live**: Visualizza istantaneamente il nuovo Stake e il nuovo ROI proiettato.
+
+### 5. **Sistema di Generazioni**
 
 I piani sono organizzati in **generazioni** (cicli):
 
@@ -327,16 +346,19 @@ Il sistema traccia il **capitale di inizio settimana** (`startWeeklyBaseline`) p
   - Grigio chiaro pulsante: In corso
 
 #### 4. **Active Plan Panel**
-- **Intestazione**: Generazione, Capitale, Profitto
+- **Intestazione**: Generazione, Capitale, Profitto, Target
 - **Badge di Stato**:
   - Verde: In profitto
   - Rosso: In perdita
   - Arancione: Rescue Mode
   - Giallo: Banked disponibile
-- **Controlli Evento**: Pulsanti per registrare vittorie/perdite
-- **Stake Suggerito**: Calcolato in tempo reale
-- **Progress Bar**: Eventi e Vittorie rimanenti
-- **Regole Attive**: Toggle per abilitare/disabilitare regole
+- **Card Profitto Attuale**: Riquadro dedicato per monitorare il guadagno netto del ciclo corrente.
+- **Pannello Puntata**: Layout "Side-by-Side" ottimizzato per desktop, con input puntata e pulsanti esito affiancati.
+- **Stats Grid**: Griglia unificata per contatori (Vittorie, Perse, Rimanenti) e allarmi (Max Perse Consecutive).
+- **Regole Attive**: Toggle per abilitare/disabilitare regole in tempo reale.
+
+#### 5. **Export Dati**
+- **CSV Download**: Scarica un report dettagliato di tutti gli eventi del piano, includendo timestamp, stake, quote e saldo progressivo.
 
 ### Trading Journal
 
@@ -481,8 +503,9 @@ Tutti i dati sono salvati in **localStorage**:
 - **Lucide React**: Icone
 
 ### Librerie
-- **Recharts**: Grafici e visualizzazioni
-- **date-fns**: Manipolazione date
+- **Recharts**: Grafici principali (Area, Line)
+- **Reaviz**: Grafici avanzati (Sankey, Heatmap)
+- **React-confetti**: Effetti visivi per le celebrazioni
 
 ### Architettura
 - **Custom Hooks**: `useMasaniello` per logica centralizzata

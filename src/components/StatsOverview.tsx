@@ -67,6 +67,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                                 <button onClick={handleUpdate} className="text-emerald-400 hover:bg-emerald-500/10 p-0.5 rounded"><XCircle size={14} className="rotate-45" /></button> {/* Using XCircle rotated as Check/Plus or just use simple text/icon if available. Let's use Check icon if imported, but XCircle is imported. I'll stick to a simple text or reuse XCircle for cancel? Wait, I need a check icon. XCircle is imported. I'll add Check/CheckCircle to imports or just use text. Let's import CheckCircle in next step if needed. For now using text 'OK' or existing icons. Let's use XCircle for cancel and click outside to save? No, explicit save. */}
                                 <button onClick={() => setIsEditingStart(false)} className="text-rose-400 hover:bg-rose-500/10 p-0.5 rounded"><XCircle size={14} /></button>
                             </div>
+
                         ) : (
                             <span
                                 className="text-slate-400 font-medium cursor-pointer hover:text-blue-400 transition-colors border-b border-transparent hover:border-blue-400 dashed"
@@ -78,6 +79,8 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                         )}
                     </div>
                 </div>
+
+
 
                 <div className="w-px h-12 bg-slate-700 hidden md:block"></div>
 
@@ -151,7 +154,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                 </div>
                 <Coins className="absolute top-2 right-2 text-yellow-500/10 w-16 h-16 pointer-events-none" />
             </div>
-        </div>
+        </div >
     );
 };
 

@@ -75,6 +75,7 @@ export interface MasaPlan {
   childrenIds?: number[];
   treeStatus?: 'active' | 'completed' | 'bankrupt' | 'merged';
   tags?: string[];
+  notificationDismissed?: boolean;
 }
 
 export interface ChartDataPoint {

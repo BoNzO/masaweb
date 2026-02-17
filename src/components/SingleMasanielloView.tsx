@@ -6,7 +6,7 @@ import HistoryLog from './HistoryLog';
 import StatsOverview from './StatsOverview';
 import ConfigurationPanel from './ConfigurationPanel';
 import DebugRules from './DebugRules';
-import { Settings, CheckCircle, RotateCcw, Archive as ArchiveIcon, RefreshCw, Edit2, PartyPopper, X, AlertOctagon } from 'lucide-react';
+import { Settings, CheckCircle, RotateCcw, Archive as ArchiveIcon, RefreshCw, Edit2, PartyPopper, X, AlertOctagon, Trash2 } from 'lucide-react';
 import type { MasanielloInstance } from '../types/masaniello';
 import type { ChartDataPoint } from '../types/masaniello';
 
@@ -15,13 +15,19 @@ interface SingleMasanielloViewProps {
     onUpdate: (updates: Partial<MasanielloInstance>) => void;
     onArchive: () => void;
     onClone: () => void;
+    onDelete: (id: string) => void;
+    archivedInstances: MasanielloInstance[];
+    onSelectInstance: (id: string) => void;
 }
 
 const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
     instance,
     onUpdate,
     onArchive,
-    onClone
+    onClone,
+    onDelete,
+    archivedInstances,
+    onSelectInstance
 }) => {
     // Use the wrapper hook that syncs with multi-Masaniello system
     const {
@@ -45,7 +51,8 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
         getRescueSuggestion,
         activateRescueMode,
         updatePlanStartCapital,
-        updateAbsoluteStartCapital
+        updateAbsoluteStartCapital,
+        setHistory // Destructure setHistory
     } = useMasanielloInstance(instance, onUpdate);
 
     const [showConfig, setShowConfig] = React.useState(!instance.currentPlan);
@@ -68,25 +75,12 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
     const [showFailure, setShowFailure] = React.useState(false);
     const [lastCycleProfit, setLastCycleProfit] = React.useState(0);
     const [failureReason, setFailureReason] = React.useState('');
-    const prevHistoryLength = React.useRef(history.length);
-    const prevInstanceId = React.useRef(instance.id);
-
     React.useEffect(() => {
-        // If we switched instances, just update the ref and don't trigger
-        if (prevInstanceId.current !== instance.id) {
-            prevInstanceId.current = instance.id;
-            prevHistoryLength.current = history.length;
-            setShowSuccess(false);
-            setShowFailure(false);
-            return;
-        }
-
-        // Detect new plan in history
-        if (history.length > prevHistoryLength.current) {
+        if (history.length > 0) {
             const lastPlan = history[history.length - 1];
 
             // FAILURE DETECTION
-            if (lastPlan.status === 'failed') {
+            if (lastPlan.status === 'failed' && !lastPlan.notificationDismissed) {
                 let reason = 'Il piano è fallito.';
                 if (lastPlan.triggeredRule === 'max_losses') {
                     reason = `Limite di ${lastPlan.maxConsecutiveLosses} perdite consecutive superato!`;
@@ -96,9 +90,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                 setFailureReason(reason);
                 setShowFailure(true);
                 setShowSuccess(false);
-                // Auto-close after 10 seconds
-                const timer = setTimeout(() => setShowFailure(false), 10000);
-                return () => clearTimeout(timer);
+                return;
             }
 
             // SUCCESS DETECTION
@@ -117,17 +109,42 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
 
             const profit = lastPlan.currentCapital - lastPlan.startCapital;
 
-            if (successStatuses.includes(lastPlan.status) && profit > 0) {
+            if (successStatuses.includes(lastPlan.status) && profit > 0 && !lastPlan.notificationDismissed) {
                 setLastCycleProfit(profit);
                 setShowSuccess(true);
                 setShowFailure(false);
-                // Auto-close after 8 seconds
-                const timer = setTimeout(() => setShowSuccess(false), 8000);
-                return () => clearTimeout(timer);
+                return;
             }
         }
-        prevHistoryLength.current = history.length;
     }, [history, instance.id]);
+
+    const handleDismissSuccess = () => {
+        setShowSuccess(false);
+        // Persist dismissal using local setter to avoid sync conflicts
+        if (history.length > 0) {
+            const lastPlanIndex = history.length - 1;
+            const updatedHistory = [...history];
+            updatedHistory[lastPlanIndex] = {
+                ...updatedHistory[lastPlanIndex],
+                notificationDismissed: true
+            };
+            setHistory(updatedHistory); // Use setHistory
+        }
+    };
+
+    const handleDismissFailure = () => {
+        setShowFailure(false);
+        // Persist dismissal for failure too
+        if (history.length > 0) {
+            const lastPlanIndex = history.length - 1;
+            const updatedHistory = [...history];
+            updatedHistory[lastPlanIndex] = {
+                ...updatedHistory[lastPlanIndex],
+                notificationDismissed: true
+            };
+            setHistory(updatedHistory); // Use setHistory
+        }
+    };
 
     const RULES = React.useMemo(() => [
         { id: 'first_win', label: 'Vittoria iniziale → Chiusura ciclo' },
@@ -302,7 +319,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                                 </div>
                             </div>
                             <button
-                                onClick={() => setShowSuccess(false)}
+                                onClick={handleDismissSuccess}
                                 className="p-2 hover:bg-white/10 rounded-full text-white transition-colors"
                             >
                                 <X size={20} />
@@ -338,7 +355,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                                 </div>
                             </div>
                             <button
-                                onClick={() => setShowFailure(false)}
+                                onClick={handleDismissFailure}
                                 className="p-2 hover:bg-white/10 rounded-full text-white transition-colors"
                             >
                                 <X size={20} />
@@ -411,66 +428,72 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                             startNewPlan();
                             setShowConfig(false);
                         }}
+                        activeRules={activeRules}
+                        toggleRule={toggleRule}
+                        toggleAllRules={toggleAllRules}
                     />
                 )
             }
 
             {/* Main Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left Column */}
-                <div className="space-y-6">
-                    <StatsOverview
-                        totalWorth={stats.totalWorth}
-                        startCapital={config.initialCapital}
-                        absoluteStartCapital={stats.absoluteStartCapital}
-                        totalProfit={stats.totalProfit}
-                        totalGrowth={stats.totalGrowth}
-                        totalBanked={stats.totalBanked}
-                        totalWins={stats.totalWins}
-                        totalLosses={stats.totalLosses}
-                        estimatedDays={0}
-                        expectedWinsTotal={0}
-                        evPerformance={1}
-                        onUpdateAbsoluteStartCapital={updateAbsoluteStartCapital}
-                    />
+            {/* Main Grid - Hidden when Config is open */}
+            {!showConfig && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Left Column */}
+                    <div className="space-y-6">
+                        <StatsOverview
+                            totalWorth={stats.totalWorth}
+                            startCapital={config.initialCapital}
+                            absoluteStartCapital={stats.absoluteStartCapital}
+                            totalProfit={stats.totalProfit}
+                            totalGrowth={stats.totalGrowth}
+                            totalBanked={stats.totalBanked}
+                            totalWins={stats.totalWins}
+                            totalLosses={stats.totalLosses}
 
-                    <AnalyticsSection
-                        chartData={chartData}
-                        heatmapData={heatmapData}
-                        weeklyTarget={weeklyTarget}
-                        weeklyTargetPercentage={displayWeeklyPercentage}
-                        currentCapital={currentPlan?.currentCapital || config.initialCapital}
-                        startCapital={currentPlan?.startWeeklyBaseline || currentPlan?.startCapital || config.initialCapital}
-                        absoluteWeeklyTarget={absoluteWeeklyTarget}
-                    />
-                </div>
-
-                {/* Right Column */}
-                <div className="space-y-6">
-                    {currentPlan && (
-                        <ActivePlan
-                            currentPlan={currentPlan}
-                            activeRules={activeRules}
-                            rules={rulesForActivePlan}
-                            toggleRule={toggleRule}
-                            toggleAllRules={toggleAllRules}
-                            getRuleStatus={getRuleStatus}
-                            onFullBet={handleFullBet}
-                            onPartialWin={handlePartialWin}
-                            onPartialLoss={handlePartialLoss}
-                            onBreakEven={handleBreakEven}
-                            onAdjustment={handleAdjustment}
-                            onActivateRescue={activateRescueMode}
-                            onEarlyClose={() => transitionToNextPlan(currentPlan, 'manual_close', null)}
-                            getNextStake={getNextStake}
-                            getRescueSuggestion={getRescueSuggestion}
-                            onUpdateStartCapital={updatePlanStartCapital}
-                            onUpdatePlan={setCurrentPlan}
-                            config={config}
+                            estimatedDays={Math.ceil((stats.totalWins + stats.totalLosses) / 2.5)}
+                            expectedWinsTotal={0}
+                            evPerformance={1}
+                            onUpdateAbsoluteStartCapital={updateAbsoluteStartCapital}
                         />
-                    )}
+
+                        <AnalyticsSection
+                            chartData={chartData}
+                            heatmapData={heatmapData}
+                            weeklyTarget={weeklyTarget}
+                            weeklyTargetPercentage={displayWeeklyPercentage}
+                            currentCapital={currentPlan?.currentCapital || config.initialCapital}
+                            startCapital={currentPlan?.startWeeklyBaseline || currentPlan?.startCapital || config.initialCapital}
+                            absoluteWeeklyTarget={absoluteWeeklyTarget}
+                        />
+                    </div>
+
+                    {/* Right Column */}
+                    <div className="space-y-6">
+                        {currentPlan && (
+                            <ActivePlan
+                                currentPlan={currentPlan}
+                                activeRules={activeRules}
+                                rules={rulesForActivePlan}
+                                toggleRule={toggleRule}
+                                toggleAllRules={toggleAllRules}
+                                getRuleStatus={getRuleStatus}
+                                onFullBet={handleFullBet}
+                                onPartialWin={handlePartialWin}
+                                onPartialLoss={handlePartialLoss}
+                                onBreakEven={handleBreakEven}
+                                onAdjustment={handleAdjustment}
+                                onActivateRescue={activateRescueMode}
+                                onEarlyClose={() => transitionToNextPlan(currentPlan, 'manual_close', null)}
+                                getNextStake={getNextStake}
+                                getRescueSuggestion={getRescueSuggestion}
+                                onUpdateStartCapital={updatePlanStartCapital}
+                                onUpdatePlan={setCurrentPlan}
+                            />
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* History */}
             <HistoryLog
@@ -485,6 +508,51 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                     <DebugRules plan={currentPlan} activeRules={activeRules} config={config} />
                 )
             }
+
+            {/* Archived Instances List (Moved from Tabs) */}
+            {archivedInstances.length > 0 && (
+                <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700/50 mt-8">
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <ArchiveIcon size={16} />
+                        Masanielli Archiviati ({archivedInstances.length})
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {archivedInstances.map(archived => (
+                            <div
+                                key={archived.id}
+                                onClick={() => onSelectInstance(archived.id)}
+                                className="bg-slate-800 hover:bg-slate-700/80 p-4 rounded-lg border border-slate-700 transition-all text-left group relative cursor-pointer"
+                            >
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="font-bold text-slate-300 group-hover:text-white transition-colors">
+                                        {archived.name}
+                                    </div>
+                                    <div className="text-[10px] bg-slate-700/50 px-2 py-1 rounded text-slate-500">
+                                        {new Date(archived.archivedAt!).toLocaleDateString()}
+                                    </div>
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Capitale Finale: <span className={(archived.currentPlan?.currentCapital || 0) >= archived.absoluteStartCapital ? 'text-green-400' : 'text-red-400'}>
+                                        €{(archived.currentPlan?.currentCapital || archived.absoluteStartCapital).toFixed(2)}
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm('Sei sicuro di voler eliminare DEFINITIVAMENTE questo Masaniello archiviato?')) {
+                                            onDelete(archived.id);
+                                        }
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 bg-slate-700 hover:bg-red-600 rounded text-slate-400 hover:text-white opacity-0 group-hover:opacity-100 transition-all"
+                                    title="Elimina definitivamente"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div >
     );
 };

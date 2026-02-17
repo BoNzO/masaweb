@@ -5,8 +5,17 @@ import { roundTwo, calculateMaxNetProfit } from '../utils/mathUtils';
 
 interface NewMasanielloFormProps {
     poolCapital: number;
-    onCreateMasaniello: (config: Config, initialCapital?: number) => void;
+    onCreateMasaniello: (config: Config, initialCapital?: number, activeRules?: string[]) => void;
 }
+
+const AVAILABLE_RULES = [
+    { id: 'auto_bank_100', label: 'Banking Target Settimanale', desc: 'Incassa % profitto al raggiungimento del target' },
+    { id: 'profit_milestone', label: 'Banking Progressivo (Milestone)', desc: 'Incassa % profitto ogni volta che raddoppi il capitale' },
+    { id: 'smart_auto_close', label: 'Smart Auto Close', desc: 'Chiudi in pari se possibile dopo sequenza negativa' },
+    { id: 'stop_loss', label: 'Stop Loss', desc: 'Interrompi il piano se raggiungi il limite di perdite consecutive' },
+    { id: 'first_win', label: 'Prima Vittoria Garantita (Bonus)', desc: 'Rimuovi rischio iniziale dopo prima vittoria' },
+    { id: 'back_positive', label: 'Torna in Positivo', desc: 'Regola dinamica per recupero rapido' }
+];
 
 const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCreateMasaniello }) => {
     const [config, setConfig] = useState<Config>({
@@ -19,6 +28,20 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
         milestoneBankPercentage: 30,
         maxConsecutiveLosses: 3
     });
+
+    const [selectedRules, setSelectedRules] = useState<string[]>([
+        'auto_bank_100',
+        'profit_milestone',
+        'smart_auto_close',
+        'first_win',
+        'back_positive'
+    ]);
+
+    const toggleRule = (ruleId: string) => {
+        setSelectedRules(prev =>
+            prev.includes(ruleId) ? prev.filter(id => id !== ruleId) : [...prev, ruleId]
+        );
+    };
 
     const previewProfit = calculateMaxNetProfit(
         config.initialCapital,
@@ -43,7 +66,7 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
             return;
         }
 
-        onCreateMasaniello(config);
+        onCreateMasaniello(config, undefined, selectedRules);
     };
 
     return (
@@ -180,9 +203,9 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
                                 type="number"
                                 value={config.weeklyTargetPercentage}
                                 onChange={(e) => setConfig({ ...config, weeklyTargetPercentage: Number(e.target.value) })}
-                                min={1}
+                                min={0}
                                 max={100}
-                                step={5}
+                                step={0.1}
                                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
                             />
                         </div>
@@ -216,6 +239,57 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
                                 className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
                             />
                         </div>
+                    </div>
+                </div>
+
+                {/* Rules Section */}
+                <div className="border-t border-slate-700 pt-4">
+                    <div className="flex justify-between items-center mb-3">
+                        <h3 className="text-sm font-bold text-slate-300">Regole Attive</h3>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (selectedRules.length === AVAILABLE_RULES.length) {
+                                    setSelectedRules([]);
+                                } else {
+                                    setSelectedRules(AVAILABLE_RULES.map(r => r.id));
+                                }
+                            }}
+                            className="text-[10px] uppercase font-bold text-slate-500 hover:text-blue-400 transition-colors"
+                        >
+                            {selectedRules.length === AVAILABLE_RULES.length ? 'Disattiva Tutti' : 'Attiva Tutti'}
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {AVAILABLE_RULES.map(rule => (
+                            <div
+                                key={rule.id}
+                                onClick={() => toggleRule(rule.id)}
+                                className={`
+                                    p-3 rounded-lg border cursor-pointer transition-all
+                                    ${selectedRules.includes(rule.id)
+                                        ? 'bg-blue-500/20 border-blue-500/50'
+                                        : 'bg-slate-900 border-slate-700 opacity-60 hover:opacity-100'}
+                                `}
+                            >
+                                <div className="flex items-start gap-3">
+                                    <div className={`
+                                        w-5 h-5 rounded border flex items-center justify-center shrink-0 mt-0.5
+                                        ${selectedRules.includes(rule.id) ? 'bg-blue-500 border-blue-500' : 'border-slate-500'}
+                                    `}>
+                                        {selectedRules.includes(rule.id) && <span className="text-white text-xs font-bold">✓</span>}
+                                    </div>
+                                    <div>
+                                        <div className={`text-xs font-bold ${selectedRules.includes(rule.id) ? 'text-blue-100' : 'text-slate-400'}`}>
+                                            {rule.label}
+                                        </div>
+                                        <div className="text-[10px] text-slate-500 leading-tight mt-1">
+                                            {rule.desc}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
 
