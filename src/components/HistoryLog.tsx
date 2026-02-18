@@ -1,8 +1,7 @@
 import React from 'react';
-import { ChevronDown, ChevronUp, LifeBuoy } from 'lucide-react';
+import { ChevronDown, ChevronUp, LifeBuoy, Download, Clock } from 'lucide-react';
 import type { MasaPlan } from '../types/masaniello';
 import { generateCSV, downloadCSV } from '../utils/exportUtils';
-import { Download } from 'lucide-react';
 
 interface HistoryLogProps {
     history: MasaPlan[];
@@ -59,11 +58,35 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ history, expandedHistory, setEx
                                     {plan.events
                                         .filter((e) => !e.isSystemLog)
                                         .map((ev) => (
-                                            <div key={ev.id} className="text-sm flex justify-between py-1 border-b border-slate-600/30 last:border-0">
-                                                <span className={ev.isVoid ? 'text-slate-400' : ev.isWin ? 'text-green-300' : 'text-red-300'}>
-                                                    #{ev.id} {ev.isVoid ? 'VOID' : ev.isWin ? 'WIN' : 'LOSS'}
-                                                </span>
-                                                <span>€{ev.capitalAfter.toFixed(2)}</span>
+                                            <div key={ev.id} className="py-2 border-b border-slate-600/30 last:border-0">
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`font-black text-[10px] w-6 h-6 rounded flex items-center justify-center ${ev.isVoid ? 'bg-slate-800 text-slate-500' : ev.isWin ? 'bg-green-500 text-green-950' : 'bg-red-500 text-white'}`}>
+                                                            {ev.isWin ? 'W' : ev.isVoid ? 'V' : 'L'}
+                                                        </span>
+                                                        <div className="flex flex-col">
+                                                            <div className="text-xs font-bold text-slate-200">
+                                                                {ev.pair || '—'}
+                                                            </div>
+                                                            <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                                                                <Clock size={8} /> {ev.nyTimestamp || ev.timestamp?.slice(11, 16) || '—'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-xs font-black text-slate-100">€{ev.capitalAfter.toFixed(2)}</div>
+                                                        <div className="text-[9px] text-slate-500">Stake: €{ev.stake.toFixed(2)}</div>
+                                                    </div>
+                                                </div>
+                                                {ev.checklistResults && Object.keys(ev.checklistResults).length > 0 && (
+                                                    <div className="flex flex-wrap gap-1 mt-1 pl-8">
+                                                        {Object.entries(ev.checklistResults).map(([task, checked]) => (
+                                                            <div key={task} className={`text-[8px] px-1.5 py-0.5 rounded border ${checked ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/5 border-rose-500/10 text-rose-500 opacity-50'}`}>
+                                                                {checked ? '✓' : '✗'} {task}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                 </div>

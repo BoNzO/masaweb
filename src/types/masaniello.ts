@@ -1,3 +1,17 @@
+export type PlanRole = 'standard' | 'master' | 'slave';
+
+export interface FeedForwardConfig {
+  slavePlanId?: string;
+  percentage: number;
+  totalFed: number;
+}
+
+export interface FeedSource {
+  masterPlanId?: string;
+  virtualBuffer: number;
+  isPaused: boolean;
+}
+
 export interface Config {
   initialCapital: number;
   quota: number;
@@ -7,6 +21,10 @@ export interface Config {
   weeklyTargetPercentage: number;
   milestoneBankPercentage: number;
   maxConsecutiveLosses?: number;
+  checklistTemplate?: string[];
+  role?: PlanRole;
+  feedForwardConfig?: FeedForwardConfig;
+  feedSource?: FeedSource;
 }
 
 export interface EventDetail {
@@ -29,7 +47,11 @@ export interface MasaEvent {
   isSystemLog?: boolean;
   message?: string;
   quota?: number;
+  pair?: string;
+  checklistResults?: Record<string, boolean>;
+  nyTimestamp?: string;
   snapshot?: EventSnapshot;
+  feedAmount?: number; // Amount fed to slave or taken from buffer
 }
 
 export interface EventSnapshot {
@@ -76,6 +98,11 @@ export interface MasaPlan {
   treeStatus?: 'active' | 'completed' | 'bankrupt' | 'merged';
   tags?: string[];
   notificationDismissed?: boolean;
+  lastUsedPair?: string;
+  weeklyTargetsReached?: number;
+  role?: PlanRole;
+  feedForwardConfig?: FeedForwardConfig;
+  feedSource?: FeedSource;
 }
 
 export interface ChartDataPoint {
@@ -135,11 +162,13 @@ export interface MultiMasaState {
 }
 
 export interface AggregatedStats {
+  totalInitialCapital: number; // Sum of all absoluteStartCapital of active Masaniellos
   totalWorth: number; // Sum of all active Masaniello capitals + banked
   totalBanked: number; // Sum of all banked amounts
   totalProfit: number;
   totalGrowth: number;
   totalWins: number;
   totalLosses: number;
+  totalWeeklyTargetsReached: number;
   combinedChartData: ChartDataPoint[];
 }

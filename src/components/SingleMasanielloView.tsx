@@ -6,7 +6,7 @@ import HistoryLog from './HistoryLog';
 import StatsOverview from './StatsOverview';
 import ConfigurationPanel from './ConfigurationPanel';
 import DebugRules from './DebugRules';
-import { Settings, CheckCircle, RotateCcw, Archive as ArchiveIcon, RefreshCw, Edit2, PartyPopper, X, AlertOctagon, Trash2 } from 'lucide-react';
+import { Settings, CheckCircle, RotateCcw, Archive as ArchiveIcon, RefreshCw, Edit2, PartyPopper, X, AlertOctagon, Trash2, Crown, Link as LinkIcon } from 'lucide-react';
 import type { MasanielloInstance } from '../types/masaniello';
 import type { ChartDataPoint } from '../types/masaniello';
 
@@ -17,7 +17,10 @@ interface SingleMasanielloViewProps {
     onClone: () => void;
     onDelete: (id: string) => void;
     archivedInstances: MasanielloInstance[];
+    activeInstances: MasanielloInstance[];
     onSelectInstance: (id: string) => void;
+    onFeed?: (amount: number) => void;
+    onBufferUpdate?: (newBuffer: number) => void;
 }
 
 const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
@@ -27,8 +30,16 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
     onClone,
     onDelete,
     archivedInstances,
-    onSelectInstance
+    activeInstances,
+    onSelectInstance,
+    onFeed,
+    onBufferUpdate
 }) => {
+    // Role status
+    const role = instance.currentPlan?.role || instance.config.role || 'standard';
+    const isMaster = role === 'master';
+    const isSlave = role === 'slave';
+
     // Use the wrapper hook that syncs with multi-Masaniello system
     const {
         config,
@@ -53,7 +64,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
         updatePlanStartCapital,
         updateAbsoluteStartCapital,
         setHistory // Destructure setHistory
-    } = useMasanielloInstance(instance, onUpdate);
+    } = useMasanielloInstance(instance, onUpdate, onFeed, onBufferUpdate);
 
     const [showConfig, setShowConfig] = React.useState(!instance.currentPlan);
     const [expandedHistory, setExpandedHistory] = React.useState<number | null>(null);
@@ -196,12 +207,28 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
         const allPlans = [...history];
         if (currentPlan) allPlans.push(currentPlan);
 
-        allPlans.forEach((plan, idx) => {
-            data.push({
-                name: `Gen ${plan.generationNumber}`,
-                capital: plan.currentCapital,
-                days: idx * 0.4,
-                cycle: plan.generationNumber
+        let eventCounter = 0;
+
+        allPlans.forEach((plan) => {
+            // Point for the start of the plan (especially for the first plan or jumps)
+            if (data.length === 0) {
+                data.push({
+                    name: `Inizio`,
+                    capital: plan.startCapital,
+                    days: 0,
+                    cycle: plan.generationNumber
+                });
+            }
+
+            const activeEvents = plan.events.filter(e => !e.isSystemLog);
+            activeEvents.forEach((ev) => {
+                eventCounter++;
+                data.push({
+                    name: `E${eventCounter}`,
+                    capital: ev.capitalAfter,
+                    days: Number((eventCounter / 2.5).toFixed(1)), // Based on 2.5 trades/day
+                    cycle: plan.generationNumber
+                });
             });
         });
 
@@ -280,6 +307,16 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                         <h2 className="text-2xl font-black text-white tracking-tight uppercase">
                             {instance.name}
                         </h2>
+                        {isMaster && (
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 rounded-full text-[10px] font-black uppercase tracking-widest">
+                                <Crown size={12} /> Master
+                            </div>
+                        )}
+                        {isSlave && (
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-full text-[10px] font-black uppercase tracking-widest">
+                                <LinkIcon size={12} /> Slave
+                            </div>
+                        )}
                         <div className="p-1.5 bg-slate-700/50 rounded-lg text-slate-400 group-hover:text-blue-400 group-hover:bg-blue-400/10 transition-all opacity-0 group-hover:opacity-100">
                             <Edit2 size={16} />
                         </div>
@@ -416,6 +453,18 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                     <ArchiveIcon size={16} />
                     ARCHIVIA
                 </button>
+
+                <button
+                    onClick={() => {
+                        if (confirm('Sei sicuro di voler eliminare DEFINITIVAMENTE questo Masaniello? Questa azione non può essere annullata.')) {
+                            onDelete(instance.id);
+                        }
+                    }}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-white text-sm font-bold flex items-center gap-2 transition-colors"
+                >
+                    <Trash2 size={16} />
+                    ELIMINA
+                </button>
             </div>
 
             {/* Configuration Panel */}
@@ -431,6 +480,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                         activeRules={activeRules}
                         toggleRule={toggleRule}
                         toggleAllRules={toggleAllRules}
+                        activeInstances={activeInstances}
                     />
                 )
             }
@@ -489,6 +539,9 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                                 getRescueSuggestion={getRescueSuggestion}
                                 onUpdateStartCapital={updatePlanStartCapital}
                                 onUpdatePlan={setCurrentPlan}
+                                config={config}
+                                activeInstances={activeInstances}
+                                onSelectInstance={onSelectInstance}
                             />
                         )}
                     </div>

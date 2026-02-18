@@ -8,6 +8,8 @@ import type {
     Config,
     ChartDataPoint
 } from '../types/masaniello';
+import { createInitialPlan } from '../utils/masaLogic';
+import { calculateMaxNetProfit } from '../utils/mathUtils';
 
 const STORAGE_KEY = 'multi_masaniello_state';
 const MAX_ACTIVE_INSTANCES = 3;
@@ -69,14 +71,17 @@ export const useMultiMasaniello = () => {
                 return prev;
             }
 
+            // Create the first plan automatically
+            const initialPlan = createInitialPlan(config, capitalToAllocate);
+
             const newInstance: MasanielloInstance = {
                 id: newId,
                 number: nextNumber,
                 name: `Masaniello #${nextNumber}`,
                 status: 'active',
                 config,
-                activeRules: activeRules || ['first_win', 'back_positive', 'auto_bank_100'],
-                currentPlan: null,
+                activeRules: activeRules || [],
+                currentPlan: initialPlan,
                 history: [],
                 absoluteStartCapital: capitalToAllocate,
                 createdAt: new Date().toISOString()
@@ -92,7 +97,7 @@ export const useMultiMasaniello = () => {
                 description: `Allocazione iniziale a ${newInstance.name}`
             };
 
-            return {
+            const newState = {
                 ...prev,
                 instances: {
                     ...prev.instances,
@@ -109,6 +114,27 @@ export const useMultiMasaniello = () => {
                 activeInstanceIds: [...prev.activeInstanceIds, newId],
                 currentViewId: newId
             };
+
+            // AUTO-LINK: If this is a Slave, update its Master to point to it
+            if (config.role === 'slave' && config.feedSource?.masterPlanId) {
+                const masterId = config.feedSource.masterPlanId;
+                const master = newState.instances[masterId];
+                if (master && master.config.role === 'master') {
+                    // Update master's config to point to this new slave
+                    newState.instances[masterId] = {
+                        ...master,
+                        config: {
+                            ...master.config,
+                            feedForwardConfig: {
+                                ...(master.config.feedForwardConfig || { percentage: 50, totalFed: 0 }),
+                                slavePlanId: newId
+                            }
+                        }
+                    };
+                }
+            }
+
+            return newState;
         });
     }, []);
 
@@ -165,12 +191,43 @@ export const useMultiMasaniello = () => {
     // Delete a Masaniello instance (permanently)
     const deleteMasaniello = useCallback((masaId: string) => {
         setMultiState(prev => {
+            const instance = prev.instances[masaId];
+            if (!instance) return prev;
+
+            let updatedPool = { ...prev.capitalPool };
+
+            // If it was an active instance, release its current capital back to pool
+            if (prev.activeInstanceIds.includes(masaId)) {
+                const currentCapitalValue = instance.currentPlan?.currentCapital || instance.absoluteStartCapital;
+                const bankedAmountAtHand = instance.history.reduce((sum, plan) => sum + (plan.accumulatedAmount || 0), 0);
+                const totalReleased = currentCapitalValue + bankedAmountAtHand;
+
+                const transaction: CapitalPoolTransaction = {
+                    id: `tx_${Date.now()}_del`,
+                    timestamp: new Date().toISOString(),
+                    type: 'release',
+                    amount: totalReleased,
+                    fromMasaId: masaId,
+                    description: `Capitale recuperato da ${instance.name} (eliminato)`
+                };
+
+                const newAllocations = { ...updatedPool.allocations };
+                delete newAllocations[masaId];
+
+                updatedPool = {
+                    totalAvailable: updatedPool.totalAvailable + totalReleased,
+                    allocations: newAllocations,
+                    history: [...updatedPool.history, transaction]
+                };
+            }
+
             const newInstances = { ...prev.instances };
             delete newInstances[masaId];
 
             return {
                 ...prev,
                 instances: newInstances,
+                capitalPool: updatedPool,
                 activeInstanceIds: prev.activeInstanceIds.filter(id => id !== masaId),
                 archivedInstanceIds: prev.archivedInstanceIds.filter(id => id !== masaId),
                 currentViewId: prev.currentViewId === masaId ? 'overview' : prev.currentViewId
@@ -186,6 +243,29 @@ export const useMultiMasaniello = () => {
         const currentCapital = source.currentPlan?.currentCapital || source.absoluteStartCapital;
         createMasaniello(source.config, currentCapital);
     }, [multiState.instances, createMasaniello]);
+
+    // Reset a Masaniello instance to its initial state
+    const resetMasaniello = useCallback((masaId: string) => {
+        setMultiState(prev => {
+            const instance = prev.instances[masaId];
+            if (!instance) return prev;
+
+            const resetInstance: MasanielloInstance = {
+                ...instance,
+                currentPlan: createInitialPlan(instance.config, instance.absoluteStartCapital),
+                history: [],
+                activeRules: []
+            };
+
+            return {
+                ...prev,
+                instances: {
+                    ...prev.instances,
+                    [masaId]: resetInstance
+                }
+            };
+        });
+    }, []);
 
     // Add capital to pool
     const addCapitalToPool = useCallback((amount: number) => {
@@ -209,18 +289,187 @@ export const useMultiMasaniello = () => {
         });
     }, []);
 
+    const setAvailableCapital = useCallback((newAmount: number) => {
+        setMultiState(prev => {
+            const difference = newAmount - prev.capitalPool.totalAvailable;
+            const transaction: CapitalPoolTransaction = {
+                id: `tx_${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                type: 'allocation',
+                amount: difference,
+                description: difference > 0
+                    ? `Capitale disponibile aumentato di €${difference.toFixed(2)}`
+                    : `Capitale disponibile ridotto di €${Math.abs(difference).toFixed(2)}`
+            };
+
+            return {
+                ...prev,
+                capitalPool: {
+                    ...prev.capitalPool,
+                    totalAvailable: newAmount,
+                    history: [...prev.capitalPool.history, transaction]
+                }
+            };
+        });
+    }, []);
+
     // Update instance (used by individual Masaniello hooks)
     const updateInstance = useCallback((masaId: string, updates: Partial<MasanielloInstance>) => {
-        setMultiState(prev => ({
-            ...prev,
-            instances: {
-                ...prev.instances,
-                [masaId]: {
-                    ...prev.instances[masaId],
-                    ...updates
+        setMultiState(prev => {
+            const instance = prev.instances[masaId];
+            if (!instance) return prev;
+
+            let finalUpdates = { ...updates };
+
+            // If config is being updated, check if it's actually different
+            if (updates.config && JSON.stringify(updates.config) !== JSON.stringify(instance.config)) {
+                const newConfig = updates.config as Config;
+                // Use the incoming plan if provided, otherwise use the existing one
+                const plan = updates.currentPlan || instance.currentPlan;
+
+                if (plan) {
+                    const hasStarted = plan.events.filter(e => !e.isSystemLog).length > 0;
+
+                    if (!hasStarted) {
+                        const maxProfit = calculateMaxNetProfit(
+                            newConfig.initialCapital,
+                            newConfig.totalEvents,
+                            newConfig.expectedWins,
+                            newConfig.quota,
+                            newConfig.maxConsecutiveLosses || 0
+                        );
+
+                        finalUpdates.currentPlan = {
+                            ...plan,
+                            startCapital: newConfig.initialCapital,
+                            currentCapital: newConfig.initialCapital,
+                            targetCapital: newConfig.initialCapital + maxProfit,
+                            maxNetProfit: maxProfit,
+                            quota: newConfig.quota,
+                            totalEvents: newConfig.totalEvents,
+                            expectedWins: newConfig.expectedWins,
+                            remainingEvents: newConfig.totalEvents,
+                            remainingWins: newConfig.expectedWins,
+                            maxConsecutiveLosses: newConfig.maxConsecutiveLosses,
+                            currentWeeklyTarget: newConfig.initialCapital * (1 + (newConfig.weeklyTargetPercentage || 20) / 100),
+                            role: newConfig.role,
+                            feedForwardConfig: newConfig.feedForwardConfig,
+                            feedSource: newConfig.feedSource
+                        };
+                    } else {
+                        const maxProfit = calculateMaxNetProfit(
+                            plan.startCapital,
+                            newConfig.totalEvents,
+                            newConfig.expectedWins,
+                            newConfig.quota,
+                            newConfig.maxConsecutiveLosses || 0
+                        );
+
+                        finalUpdates.currentPlan = {
+                            ...plan,
+                            targetCapital: plan.startCapital + maxProfit,
+                            maxNetProfit: maxProfit,
+                            quota: newConfig.quota,
+                            totalEvents: newConfig.totalEvents,
+                            expectedWins: newConfig.expectedWins,
+                            maxConsecutiveLosses: newConfig.maxConsecutiveLosses,
+                            role: newConfig.role,
+                            feedForwardConfig: newConfig.feedForwardConfig,
+                            feedSource: newConfig.feedSource
+                        };
+                    }
                 }
             }
-        }));
+
+            return {
+                ...prev,
+                instances: {
+                    ...prev.instances,
+                    [masaId]: {
+                        ...prev.instances[masaId],
+                        ...finalUpdates
+                    }
+                }
+            };
+        });
+    }, []);
+
+    // Feed a slave plan from a master plan
+    const feedSlave = useCallback((masterId: string, amount: number) => {
+        setMultiState(prev => {
+            const master = prev.instances[masterId];
+            if (!master || master.config.role !== 'master' || !master.config.feedForwardConfig?.slavePlanId) return prev;
+
+            const slaveId = master.config.feedForwardConfig.slavePlanId;
+            const slave = prev.instances[slaveId];
+            if (!slave || slave.config.role !== 'slave' || !slave.config.feedSource) return prev;
+
+            const newBuffer = (slave.config.feedSource.virtualBuffer || 0) + amount;
+            const slavePlan = slave.currentPlan;
+
+            const updatedSlaveConfig = {
+                ...slave.config,
+                feedSource: {
+                    ...slave.config.feedSource,
+                    virtualBuffer: newBuffer,
+                    isPaused: newBuffer <= 0
+                }
+            };
+
+            const updatedSlave: MasanielloInstance = {
+                ...slave,
+                config: updatedSlaveConfig
+            };
+
+            // Update the current plan to reflect the new buffer as currentCapital
+            if (slavePlan) {
+                const hasNoEvents = !slavePlan.events || slavePlan.events.filter(e => !e.isSystemLog).length === 0;
+
+                // If the plan hasn't started yet (no events), update start capital and recalculate targets
+                if (hasNoEvents) {
+                    const maxProfit = calculateMaxNetProfit(
+                        newBuffer,
+                        slavePlan.totalEvents,
+                        slavePlan.expectedWins,
+                        slavePlan.quota,
+                        slavePlan.maxConsecutiveLosses || 0
+                    );
+
+                    updatedSlave.currentPlan = {
+                        ...slavePlan,
+                        startCapital: newBuffer,
+                        currentCapital: newBuffer,
+                        targetCapital: newBuffer + maxProfit,
+                        maxNetProfit: maxProfit,
+                        currentWeeklyTarget: newBuffer * (1 + (slave.config.weeklyTargetPercentage || 20) / 100),
+                        feedSource: {
+                            ...slavePlan.feedSource!,
+                            virtualBuffer: newBuffer,
+                            isPaused: newBuffer <= 0
+                        }
+                    };
+                } else {
+                    // Plan has already started, just update current capital
+                    updatedSlave.currentPlan = {
+                        ...slavePlan,
+                        currentCapital: newBuffer,
+                        feedSource: {
+                            ...slavePlan.feedSource!,
+                            virtualBuffer: newBuffer,
+                            isPaused: newBuffer <= 0
+                        }
+                    };
+                }
+            }
+
+            return {
+                ...prev,
+                instances: {
+                    ...prev.instances,
+                    [slaveId]: updatedSlave
+                }
+            };
+        });
     }, []);
 
     // Set current view
@@ -244,12 +493,16 @@ export const useMultiMasaniello = () => {
         const combinedChartData: ChartDataPoint[] = [];
         const timelineEvents: { timestamp: string; masaId: string }[] = [];
 
+        let totalWeeklyTargetsReached = 0;
         activeInstances.forEach(instance => {
             const currentCaptial = instance.currentPlan?.currentCapital || instance.absoluteStartCapital;
             const banked = instance.history.reduce((sum, plan) => sum + (plan.accumulatedAmount || 0), 0);
 
             totalWorth += currentCaptial + banked;
             totalBanked += banked;
+
+            // Count weekly targets reached in history (including rollovers)
+            totalWeeklyTargetsReached += instance.history.reduce((sum, p) => sum + (p.weeklyTargetsReached || 0), 0);
 
             // Count wins/losses
             instance.history.forEach(plan => {
@@ -259,6 +512,7 @@ export const useMultiMasaniello = () => {
             if (instance.currentPlan) {
                 totalWins += instance.currentPlan.wins;
                 totalLosses += instance.currentPlan.losses;
+                totalWeeklyTargetsReached += (instance.currentPlan.weeklyTargetsReached || 0);
             }
 
             // Initial capital allocation
@@ -330,12 +584,14 @@ export const useMultiMasaniello = () => {
         const totalGrowth = totalInitialCapital > 0 ? (totalProfit / totalInitialCapital) * 100 : 0;
 
         return {
+            totalInitialCapital,
             totalWorth,
             totalBanked,
             totalProfit,
             totalGrowth,
             totalWins,
             totalLosses,
+            totalWeeklyTargetsReached,
             combinedChartData
         };
     }, [multiState]);
@@ -347,9 +603,20 @@ export const useMultiMasaniello = () => {
         deleteMasaniello,
         cloneMasaniello,
         addCapitalToPool,
+        setAvailableCapital,
         updateInstance,
+        resetMasaniello,
+        feedSlave,
         setCurrentView,
         aggregatedStats,
-        canCreateNew: multiState.activeInstanceIds.length < MAX_ACTIVE_INSTANCES
+        canCreateNew: multiState.activeInstanceIds.length < MAX_ACTIVE_INSTANCES,
+        resetSystem: useCallback(() => {
+            if (window.confirm('Sei sicuro di voler resettare l\'intero sistema? Tutti i Masanielli (attivi e archiviati) e il capitale residuo verranno persi definitivamente.')) {
+                const defaultState = createDefaultMultiState();
+                setMultiState(defaultState);
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultState));
+                window.location.reload(); // Hard reload to ensure all states are clean
+            }
+        }, [])
     };
 };

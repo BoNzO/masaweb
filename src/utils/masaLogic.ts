@@ -1,5 +1,48 @@
-
 import { calculateMaxNetProfit, calculateMasaDenominator } from './mathUtils';
+import type { Config, MasaPlan } from '../types/masaniello';
+
+export const createInitialPlan = (config: Config, startCapital?: number): MasaPlan => {
+    const capital = startCapital !== undefined ? startCapital : config.initialCapital;
+    const maxProfit = calculateMaxNetProfit(
+        capital,
+        config.totalEvents,
+        config.expectedWins,
+        config.quota,
+        config.maxConsecutiveLosses || 0
+    );
+    return {
+        id: Date.now(),
+        startCapital: capital,
+        currentCapital: capital,
+        targetCapital: capital + maxProfit,
+        currentWeeklyTarget: capital * (1 + (config.weeklyTargetPercentage || 0) / 100),
+        maxNetProfit: maxProfit,
+        quota: config.quota,
+        totalEvents: config.totalEvents,
+        expectedWins: config.expectedWins,
+        events: [],
+        remainingEvents: config.totalEvents,
+        remainingWins: config.expectedWins,
+        wins: 0,
+        losses: 0,
+        status: 'active',
+        triggeredRule: null,
+        wasNegative: false,
+        accumulatedAmount: 0,
+        isRescued: false,
+        createdAt: new Date().toISOString(),
+        generationNumber: 0,
+        maxConsecutiveLosses: config.maxConsecutiveLosses,
+        currentConsecutiveLosses: 0,
+        parentId: null,
+        childrenIds: [],
+        treeStatus: 'active',
+        tags: [],
+        role: config.role,
+        feedForwardConfig: config.feedForwardConfig,
+        feedSource: config.feedSource
+    };
+};
 
 export const calculateStake = (
     currentCapital: number,

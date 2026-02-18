@@ -5,6 +5,8 @@ export const generateCSV = (plan: MasaPlan): string => {
     const headers = [
         'ID Evento',
         'Data/Ora',
+        'NY Time',
+        'Asset',
         'Tipo',
         'Messaggio',
         'Quota',
@@ -13,9 +15,9 @@ export const generateCSV = (plan: MasaPlan): string => {
         'Capitale Dopo',
         'Vittorie Rimaste',
         'Eventi Rimasti',
+        'Checklist',
         'Config: Cap. Iniziale',
         'Config: Target %',
-        'Config: Stop Loss %',
         'Snapshot: Consecutive Losses',
         'Snapshot: Rescued',
         'Snapshot: Active Rules'
@@ -25,18 +27,26 @@ export const generateCSV = (plan: MasaPlan): string => {
         const type = event.isSystemLog ? 'SISTEMA' : 'EVENTO';
         const result = event.isVoid ? 'VOID' : event.isWin ? 'WIN' : 'LOSS';
 
+        // Checklist Result Summary
+        const checklistSummary = event.checklistResults
+            ? Object.entries(event.checklistResults)
+                .map(([task, checked]) => `${task}: ${checked ? 'OK' : 'FAIL'}`)
+                .join(' | ')
+            : '-';
+
         // Snapshot data if available
         const snapshot = event.snapshot;
         const configInitialCap = snapshot?.config.initialCapital ?? '-';
         const configTargetPerc = snapshot?.config.weeklyTargetPercentage ?? '-';
-        const configStopLoss = snapshot?.config.stopLossPercentage ?? '-';
         const snapCL = snapshot?.currentConsecutiveLosses ?? '-';
         const snapRescued = snapshot?.isRescued ? 'SI' : 'NO';
         const snapRules = snapshot?.activeRules.join('|') ?? '-';
 
         return [
             event.id,
-            event.timestamp,
+            `"${event.timestamp}"`,
+            `"${event.nyTimestamp || '-'}"`,
+            event.pair || '-',
             type,
             `"${event.message || ''}"`, // Quote message to handle commas
             event.quota ?? '-',
@@ -45,9 +55,9 @@ export const generateCSV = (plan: MasaPlan): string => {
             event.capitalAfter.toFixed(2),
             event.winsLeft,
             event.eventsLeft,
+            `"${checklistSummary}"`,
             configInitialCap,
             configTargetPerc,
-            configStopLoss,
             snapCL,
             snapRescued,
             `"${snapRules}"`

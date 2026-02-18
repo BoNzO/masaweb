@@ -14,7 +14,12 @@ import {
     Shield,
     Plus,
     Minus,
-    Download
+    Download,
+    Globe,
+    ClipboardCheck,
+    AlertOctagon,
+    Crown,
+    Link as LinkIcon
 } from 'lucide-react';
 import { generateCSV, downloadCSV } from '../utils/exportUtils';
 import type { MasaPlan, Rule } from '../types/masaniello';
@@ -29,9 +34,9 @@ interface ActivePlanProps {
     toggleRule: (id: string) => void;
     toggleAllRules: (ids: string[]) => void;
     getRuleStatus: (id: string) => { active: boolean; enabled: boolean; isSuspended?: boolean };
-    onFullBet: (isWin: boolean, customQuota?: number) => void;
-    onPartialWin: (customQuota: number) => void;
-    onPartialLoss: (customQuota: number) => void;
+    onFullBet: (isWin: boolean, customQuota?: number, pair?: string, checklistResults?: Record<string, boolean>) => void;
+    onPartialWin: (customQuota: number, pair?: string, checklistResults?: Record<string, boolean>) => void;
+    onPartialLoss: (customQuota: number, pair?: string, checklistResults?: Record<string, boolean>) => void;
     onBreakEven: () => void;
     onAdjustment: (amount: number, isWinEquivalent: boolean) => void;
     onActivateRescue: (events: number, target?: number, wins?: number, extraCap?: number, maxLosses?: number) => void;
@@ -46,6 +51,9 @@ interface ActivePlanProps {
     } | null;
     onUpdatePlan: (newPlan: MasaPlan) => void;
     onUpdateStartCapital: (newAmount: number) => void;
+    config: { checklistTemplate?: string[] };
+    activeInstances?: any[];
+    onSelectInstance?: (id: string) => void;
 }
 
 const ActivePlan: React.FC<ActivePlanProps> = ({
@@ -65,6 +73,9 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     getNextStake,
     getRescueSuggestion,
     onUpdateStartCapital,
+    config,
+    activeInstances = [],
+    onSelectInstance,
 }) => {
     const [rescueEventsToAdd, setRescueEventsToAdd] = useState(2);
     const [rescueWinsToAdd, setRescueWinsToAdd] = useState(0);
@@ -72,6 +83,31 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     const [showManualRescue, setShowManualRescue] = useState(false);
     const [rulesExpanded, setRulesExpanded] = useState(false);
     const [currentQuota, setCurrentQuota] = useState<number>(currentPlan.quota);
+
+    // Gatekeeper State
+    const [activePair, setActivePair] = useState(currentPlan.lastUsedPair || '');
+    const [checklist, setChecklist] = useState<Record<string, boolean>>(() => {
+        const initial: Record<string, boolean> = {};
+        (config.checklistTemplate || []).forEach(item => {
+            initial[item] = false;
+        });
+        return initial;
+    });
+
+    const toggleChecklistItem = (item: string) => {
+        setChecklist(prev => ({ ...prev, [item]: !prev[item] }));
+    };
+
+    const isChecklistComplete = (config.checklistTemplate || []).every(item => checklist[item]);
+
+    // Reset checklist after each trade
+    const resetChecklist = () => {
+        const initial: Record<string, boolean> = {};
+        (config.checklistTemplate || []).forEach(item => {
+            initial[item] = false;
+        });
+        setChecklist(initial);
+    };
 
     // Start Capital Editing
     const [isEditingStart, setIsEditingStart] = useState(false);
@@ -111,7 +147,8 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     const displayStake = getNextStake(currentQuota);
     const isZombieState = currentPlan.remainingWins <= 0 && currentPlan.currentCapital < currentPlan.targetCapital - 0.01 && currentPlan.status === 'active';
 
-    const isTargetReached = currentPlan.currentCapital >= currentPlan.targetCapital - 0.01;
+    const isTargetReached = currentPlan.currentCapital > 0 && currentPlan.currentCapital >= currentPlan.targetCapital - 0.01;
+    const isRescueVisible = !isTargetReached && (showManualRescue || ((isCritical || isRescueNeededAfterWins) && !currentPlan.isRescued));
 
     // Failure Conditions
     const isCapitalExhausted = currentPlan.currentCapital < 0.05 && structuralLosses >= totalAllowedErrors;
@@ -189,32 +226,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
             )}
 
 
-            {/* CONFIGURATION & STATUS */}
-            {!isTargetReached && ( // Hide config/rescue if target reached to focus on closure? No, maybe keep config visible but hide warnings.
-                // Actually user request was "Una volta raggiunto l'obiettivo questa finestra non dovrebbe uscire" referring to the alert.
-                // Let's keep the standard UI but conditionally render the Alert.
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* ... existing config cards ... */}
-                </div>
-            )}
-            {/* Note: I cannot see the Config Cards code in the snippet to wrap it.
-             I will just modify the Alert condition as requested.
-             */}
-
-
-            {/* Status Cards (Win/Loss/Events) - Assuming these are below, I will just proceed with the Alert modification in the next block or included here if possible. 
-               Wait, I see the loop. The snippet ends at 370.
-               I need to replace lines 117 to ... wait.
-               The snippet I read was 100-140 AND 330-370.
-               I don't have the contiguous block.
-               I should split this into two edits if strictness requires.
-               But I can probably do it if I define isTargetReached at the top and then conditionally render.
-               
-               Let's replace the `return (` block start to include `isTargetReached` logic.
-            */}
-
-
-            {/* 0. ALERTS STACK (MOVED TO TOP) */}
+            {/* ALERTS STACK */}
             <div className="space-y-3 mb-6">
                 {/* Early Closure */}
                 {earlyClosure?.shouldClose && (
@@ -235,200 +247,172 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 )}
 
                 {/* Rescue / Critical Logic */}
-                {(() => {
-                    const isCriticalVisible = !isTargetReached && (showManualRescue || ((isCritical || isRescueNeededAfterWins) && !currentPlan.isRescued));
+                {isRescueVisible && (
+                    <div className="bg-gradient-to-r from-red-900 to-rose-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-red-500 flex flex-col gap-4 animate-in slide-in-from-top-2">
+                        {/* ... existing Rescue/Critical content ... */}
+                        {/* I'll use a placeholder and then fix it if it works, or better, just keep the content carefully */}
+                        <div className="flex justify-between items-start">
+                            <div className="flex items-start gap-3">
+                                <div className="p-2 bg-red-500/20 rounded-lg">
+                                    <AlertTriangle size={20} className="text-red-300" />
+                                </div>
+                                <div>
+                                    <div className="font-black text-sm uppercase tracking-wider text-red-100">Rescue: Soglia Critica</div>
+                                    <div className="text-xs text-red-200 opacity-80 max-w-sm">
+                                        Rischio elevato. Consigliato intervento per correggere il tiro.
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                {rescueSuggestion && (
+                                    <button onClick={() => onActivateRescue(rescueSuggestion.eventsToAdd, rescueSuggestion.targetCapital, rescueSuggestion.winsToAdd, 0)} className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border border-red-400/30">
+                                        Rescue Auto (+{rescueSuggestion.winsToAdd}V)
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setShowManualRescue(!showManualRescue)}
+                                    className={`bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border ${showManualRescue ? 'border-indigo-500 text-indigo-300' : 'border-slate-600'}`}
+                                >
+                                    {showManualRescue ? 'Chiudi Manuale' : 'Manuale...'}
+                                </button>
+                            </div>
+                        </div>
 
-                    return (
-                        <>
-                            {/* Rescue / Critical */}
-                            {isCriticalVisible && (
-                                <div className="bg-gradient-to-r from-red-900 to-rose-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-red-500 flex flex-col gap-4 animate-in slide-in-from-top-2">
-                                    <div className="flex justify-between items-start">
-                                        <div className="flex items-start gap-3">
-                                            <div className="p-2 bg-red-500/20 rounded-lg">
-                                                <AlertTriangle size={20} className="text-red-300" />
-                                            </div>
-                                            <div>
-                                                <div className="font-black text-sm uppercase tracking-wider text-red-100">Rescue: Soglia Critica</div>
-                                                <div className="text-xs text-red-200 opacity-80 max-w-sm">
-                                                    Rischio elevato. Consigliato intervento per correggere il tiro.
-                                                </div>
-                                            </div>
+                        {showManualRescue && (
+                            <div className="bg-black/20 rounded-lg p-4 border border-white/10 animate-in fade-in slide-in-from-top-1 space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {/* Events Selector */}
+                                    <div>
+                                        <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
+                                            <LifeBuoy size={12} /> Aggiungi Eventi:
                                         </div>
-                                        {/* Actions Right Side */}
-                                        <div className="flex gap-2">
-                                            {rescueSuggestion && (
-                                                <button onClick={() => onActivateRescue(rescueSuggestion.eventsToAdd, rescueSuggestion.targetCapital, rescueSuggestion.winsToAdd, 0)} className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border border-red-400/30">
-                                                    Rescue Auto (+{rescueSuggestion.winsToAdd}V)
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {[1, 2, 3, 4, 5, 6, 8, 10].map((num) => (
+                                                <button
+                                                    key={num}
+                                                    onClick={() => setRescueEventsToAdd(num)}
+                                                    className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueEventsToAdd === num ? 'bg-white text-rose-900 scale-110 shadow-lg ring-2 ring-rose-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                                >
+                                                    +{num}
                                                 </button>
-                                            )}
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Wins Selector */}
+                                    <div>
+                                        <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
+                                            <TrendingUp size={12} /> Aggiungi Vittorie:
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {[0, 1, 2, 3, 4, 5].map((num) => (
+                                                <button
+                                                    key={num}
+                                                    onClick={() => setRescueWinsToAdd(num)}
+                                                    className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueWinsToAdd === num ? 'bg-emerald-400 text-emerald-950 scale-110 shadow-lg ring-2 ring-emerald-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                                >
+                                                    +{num}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Max Losses Selector */}
+                                    <div>
+                                        <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
+                                            <ShieldAlert size={12} /> Max Loss (M):
+                                        </div>
+                                        <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-lg border border-slate-700/50">
                                             <button
-                                                onClick={() => setShowManualRescue(!showManualRescue)}
-                                                className={`bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border ${showManualRescue ? 'border-indigo-500 text-indigo-300' : 'border-slate-600'}`}
+                                                onClick={() => setRescueMaxLosses(Math.max(0, rescueMaxLosses - 1))}
+                                                className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
                                             >
-                                                {showManualRescue ? 'Chiudi Manuale' : 'Manuale...'}
+                                                -
+                                            </button>
+                                            <span className={`text-xs font-bold w-full text-center ${rescueMaxLosses === 0 ? 'text-slate-500' : 'text-orange-400'}`}>
+                                                {rescueMaxLosses === 0 ? '∞' : rescueMaxLosses}
+                                            </span>
+                                            <button
+                                                onClick={() => setRescueMaxLosses(rescueMaxLosses + 1)}
+                                                className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
+                                            >
+                                                +
                                             </button>
                                         </div>
                                     </div>
-
-                                    {/* Manual Rescue Expandable Area */}
-                                    {showManualRescue && (
-                                        <div className="bg-black/20 rounded-lg p-4 border border-white/10 animate-in fade-in slide-in-from-top-1 space-y-4">
-
-                                            {/* 1. SELECTORS */}
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                {/* Events Selector */}
-                                                <div>
-                                                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
-                                                        <LifeBuoy size={12} /> Aggiungi Eventi:
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {[1, 2, 3, 4, 5, 6, 8, 10].map((num) => (
-                                                            <button
-                                                                key={num}
-                                                                onClick={() => setRescueEventsToAdd(num)}
-                                                                className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueEventsToAdd === num ? 'bg-white text-rose-900 scale-110 shadow-lg ring-2 ring-rose-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                                                            >
-                                                                +{num}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-
-                                                {/* Wins Selector */}
-                                                <div>
-                                                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
-                                                        <TrendingUp size={12} /> Aggiungi Vittorie:
-                                                    </div>
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {[0, 1, 2, 3, 4, 5].map((num) => (
-                                                            <button
-                                                                key={num}
-                                                                onClick={() => setRescueWinsToAdd(num)}
-                                                                className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueWinsToAdd === num ? 'bg-emerald-400 text-emerald-950 scale-110 shadow-lg ring-2 ring-emerald-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                                                            >
-                                                                +{num}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-
-                                                {/* Max Losses Selector */}
-                                                <div>
-                                                    <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
-                                                        <ShieldAlert size={12} /> Max Loss (M):
-                                                    </div>
-                                                    <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-lg border border-slate-700/50">
-                                                        <button
-                                                            onClick={() => setRescueMaxLosses(Math.max(0, rescueMaxLosses - 1))}
-                                                            className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
-                                                        >
-                                                            -
-                                                        </button>
-                                                        <span className={`text-xs font-bold w-full text-center ${rescueMaxLosses === 0 ? 'text-slate-500' : 'text-orange-400'}`}>
-                                                            {rescueMaxLosses === 0 ? '∞' : rescueMaxLosses}
-                                                        </span>
-                                                        <button
-                                                            onClick={() => setRescueMaxLosses(rescueMaxLosses + 1)}
-                                                            className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
-                                                        >
-                                                            +
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* 2. PROJECTION PANEL */}
-                                            {(() => {
-                                                // Real-time Projection Calculation
-                                                const newTotalEvents = currentPlan.remainingEvents + rescueEventsToAdd;
-                                                const newTotalWins = currentPlan.remainingWins + rescueWinsToAdd;
-
-                                                // Calculate new Max Profit based on Current Capital 
-                                                const projectedMaxProfit = calculateMaxNetProfit(
-                                                    currentPlan.currentCapital,
-                                                    newTotalEvents,
-                                                    newTotalWins,
-                                                    currentPlan.quota,
-                                                    rescueMaxLosses
-                                                );
-
-                                                const projectedTarget = currentPlan.currentCapital + projectedMaxProfit;
-
-                                                return (
-                                                    <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/50 flex flex-col gap-2">
-                                                        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                                                            <div className="flex gap-4 text-center sm:text-left">
-                                                                <div>
-                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Target</div>
-                                                                    <div className="text-sm font-black text-blue-300">€{projectedTarget.toFixed(2)}</div>
-                                                                </div>
-                                                                <div>
-                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Utile</div>
-                                                                    <div className="text-sm font-black text-emerald-400">+€{projectedMaxProfit.toFixed(2)}</div>
-                                                                </div>
-                                                                <div className="hidden sm:block">
-                                                                    <div className="text-[10px] text-slate-500 uppercase font-bold">Configurazione</div>
-                                                                    <div className="text-xs font-bold text-slate-300">
-                                                                        {currentPlan.expectedWins + rescueWinsToAdd}/{currentPlan.totalEvents + rescueEventsToAdd} @ {currentPlan.quota}
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-
-                                                            <button
-                                                                onClick={() => {
-                                                                    onActivateRescue(rescueEventsToAdd, projectedTarget, rescueWinsToAdd, 0, rescueMaxLosses);
-                                                                    setShowManualRescue(false);
-                                                                }}
-                                                                className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-xs font-black uppercase tracking-wider shadow-lg transition-all active:scale-95"
-                                                            >
-                                                                Applica Modifiche
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })()}
-
-                                        </div>
-                                    )}
                                 </div>
-                            )}
 
-                            {/* Anti-Tilt (Only if Critical is NOT visible) */}
-                            {!isCriticalVisible && (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold && !currentPlan.isRescued && (
-                                <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-indigo-500 flex flex-col md:flex-row justify-between items-center gap-4">
-                                    <div className="flex items-start gap-3">
-                                        <div className="p-2 bg-indigo-500/20 rounded-lg">
-                                            <ShieldAlert size={20} className="text-indigo-300" />
-                                        </div>
-                                        <div>
-                                            <div className="font-black text-sm uppercase tracking-wider text-indigo-100 flex items-center gap-2">
-                                                Rescue: Anti-Tilt
+                                {/* Projection Panel */}
+                                {(() => {
+                                    const newTotalEvents = currentPlan.remainingEvents + rescueEventsToAdd;
+                                    const newTotalWins = currentPlan.remainingWins + rescueWinsToAdd;
+                                    const projectedMaxProfit = calculateMaxNetProfit(
+                                        currentPlan.currentCapital,
+                                        newTotalEvents,
+                                        newTotalWins,
+                                        currentPlan.quota,
+                                        rescueMaxLosses
+                                    );
+                                    const projectedTarget = currentPlan.currentCapital + projectedMaxProfit;
+
+                                    return (
+                                        <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/50 flex flex-col gap-2">
+                                            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                                                <div className="flex gap-4 text-center sm:text-left">
+                                                    <div>
+                                                        <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Target</div>
+                                                        <div className="text-sm font-black text-blue-300">€{projectedTarget.toFixed(2)}</div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Utile</div>
+                                                        <div className="text-sm font-black text-emerald-400">+€{projectedMaxProfit.toFixed(2)}</div>
+                                                    </div>
+                                                </div>
+
                                                 <button
-                                                    onClick={() => alert(`Rescue (Anti-Tilt):\n\nIl motore "Rescue" ha rilevato ${currentPlan.currentConsecutiveLosses} sconfitte consecutive, attivando la protezione Anti-Tilt.\n\nTi suggeriamo di applicare un "Rescue Rapido" (+1 Evento). Questa azione estende il piano mantenendo il target invariato, abbattendo drasticamente lo stake necessario e riducendo la pressione psicologica.`)}
-                                                    className="bg-indigo-800/50 hover:bg-indigo-700/50 rounded-full w-4 h-4 flex items-center justify-center text-[10px] text-indigo-200"
+                                                    onClick={() => {
+                                                        onActivateRescue(rescueEventsToAdd, projectedTarget, rescueWinsToAdd, 0, rescueMaxLosses);
+                                                        setShowManualRescue(false);
+                                                    }}
+                                                    className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-xs font-black uppercase tracking-wider shadow-lg transition-all active:scale-95"
                                                 >
-                                                    ?
+                                                    Applica Modifiche
                                                 </button>
                                             </div>
-                                            <div className="text-xs text-indigo-200 opacity-80 max-w-sm">
-                                                {currentPlan.currentConsecutiveLosses} loss consecutivi. Attiva il Rescue Rapido.
-                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="flex flex-col sm:flex-row gap-2">
-                                        <button onClick={() => setShowManualRescue(true)} className="bg-slate-800 hover:bg-slate-700 text-indigo-200 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-md border border-indigo-500/30 transition-colors">
-                                            Usa Rescue Anti-Tilt
-                                        </button>
-                                        <button onClick={() => onActivateRescue(1, currentPlan.targetCapital, 0, 0)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md transition-colors">
-                                            Rescue Rapido (+1)
-                                        </button>
-                                    </div>
+                                    );
+                                })()}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Anti-Tilt (Only if Critical is NOT visible) */}
+                {!isRescueVisible && (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold && !currentPlan.isRescued && (
+                    <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-indigo-500 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-indigo-500/20 rounded-lg">
+                                <ShieldAlert size={20} className="text-indigo-300" />
+                            </div>
+                            <div>
+                                <div className="font-black text-sm uppercase tracking-wider text-indigo-100 flex items-center gap-2">
+                                    Rescue: Anti-Tilt
                                 </div>
-                            )}
-                        </>
-                    );
-                })()}
+                                <div className="text-xs text-indigo-200 opacity-80 max-w-sm">
+                                    {currentPlan.currentConsecutiveLosses} loss consecutivi. Attiva il Rescue Rapido.
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                            <button onClick={() => setShowManualRescue(true)} className="bg-slate-800 hover:bg-slate-700 text-indigo-200 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-md border border-indigo-500/30 transition-colors">
+                                Usa Rescue Anti-Tilt
+                            </button>
+                            <button onClick={() => onActivateRescue(1, currentPlan.targetCapital, 0, 0)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md transition-colors">
+                                Rescue Rapido (+1)
+                            </button>
+                        </div>
+                    </div>
+                )}
 
             </div>
 
@@ -458,6 +442,70 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                         {currentPlan.currentCapital >= currentPlan.startCapital ? 'Profit' : 'Drawdown'}
                     </div>
                 </div>
+
+                {/* Role Specific Header Extra */}
+                {(currentPlan.role === 'master' || currentPlan.role === 'slave') && (
+                    <div className="mb-4 relative z-10">
+                        {currentPlan.role === 'master' && (
+                            <div className="flex items-center justify-between p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl animate-in slide-in-from-right-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-yellow-500/20 rounded-xl text-yellow-500">
+                                        <Crown size={20} />
+                                    </div>
+                                    <div
+                                        className="cursor-pointer group/masterlink"
+                                        onClick={() => {
+                                            if (currentPlan.feedForwardConfig?.slavePlanId && onSelectInstance) {
+                                                onSelectInstance(currentPlan.feedForwardConfig.slavePlanId);
+                                            }
+                                        }}
+                                    >
+                                        <div className="text-[10px] font-black text-yellow-500 uppercase tracking-widest leading-none mb-1 flex items-center gap-2">
+                                            Master Account
+                                            {currentPlan.feedForwardConfig?.slavePlanId && (
+                                                <LinkIcon size={10} className="text-yellow-500/50 group-hover/masterlink:text-yellow-400" />
+                                            )}
+                                        </div>
+                                        <div className="text-xs font-bold text-yellow-200/80">
+                                            Feeding {currentPlan.feedForwardConfig?.percentage}% profit to {
+                                                activeInstances.find((i: any) => i.id === currentPlan.feedForwardConfig?.slavePlanId)?.name || 'Slave'
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[9px] font-black text-yellow-500 uppercase tracking-widest leading-none mb-1">Total Fed</div>
+                                    <div className="text-sm font-black text-white">€{currentPlan.feedForwardConfig?.totalFed?.toFixed(2)}</div>
+                                </div>
+                            </div>
+                        )}
+                        {currentPlan.role === 'slave' && (
+                            <div className={`flex items-center justify-between p-3 border rounded-2xl transition-all ${currentPlan.feedSource?.isPaused ? 'bg-purple-950/40 border-purple-500/50 animate-pulse' : 'bg-purple-500/10 border-purple-500/30'}`}>
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-xl transition-colors ${currentPlan.feedSource?.isPaused ? 'bg-red-500/20 text-red-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                                        <LinkIcon size={20} />
+                                    </div>
+                                    <div>
+                                        <div className={`text-[10px] font-black uppercase tracking-widest leading-none mb-1 ${currentPlan.feedSource?.isPaused ? 'text-red-400' : 'text-purple-400'}`}>
+                                            Slave Plan {currentPlan.feedSource?.isPaused ? '(PAUSED)' : '(ACTIVE)'}
+                                        </div>
+                                        <div className="text-xs font-bold text-purple-200/80">
+                                            {currentPlan.feedSource?.isPaused
+                                                ? 'Attesa alimentazione dal Master per sbloccare'
+                                                : 'Sto usando il Virtual Buffer alimentato dal Master'}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[9px] font-black text-purple-500 uppercase tracking-widest leading-none mb-1">Virtual Buffer</div>
+                                    <div className={`text-sm font-black ${currentPlan.feedSource?.isPaused ? 'text-red-400' : 'text-white'}`}>
+                                        €{currentPlan.feedSource?.virtualBuffer?.toFixed(2)}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Main Stats Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 relative z-10">
@@ -520,18 +568,24 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 <div className="mt-6 relative z-10">
                     <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                         <span>Progresso</span>
-                        <span>{Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100)).toFixed(1)}%</span>
+                        <span>{currentPlan.targetCapital > currentPlan.startCapital
+                            ? Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100)).toFixed(1)
+                            : '0.0'}%</span>
                     </div>
                     <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700/30">
                         <div
                             className={`h-full transition-all duration-1000 ease-out ${currentPlan.currentCapital >= currentPlan.startCapital ? 'bg-gradient-to-r from-blue-500 to-emerald-400' : 'bg-rose-500'}`}
-                            style={{ width: `${Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100))}%` }}
+                            style={{
+                                width: `${currentPlan.targetCapital > currentPlan.startCapital
+                                    ? Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100))
+                                    : 0}%`
+                            }}
                         />
                     </div>
                 </div>
             </div>
 
-            {/* 5. RULES (Collapsible) - MOVED HERE */}
+            {/* 5. RULES (Collapsible) */}
             <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-4">
                 <button
                     onClick={() => setRulesExpanded(!rulesExpanded)}
@@ -580,7 +634,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
             </div>
 
             {/* 2. STATS & CONDIZIONI GRID */}
-            <div className={`grid grid-cols-1 sm:grid-cols-3 ${((currentPlan.maxConsecutiveLosses || 0) > 0) ? 'lg:grid-cols-4' : ''} gap-4 relative z-10 mb-6`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-3 ${(currentPlan.maxConsecutiveLosses || 0) > 0 ? 'lg:grid-cols-4' : ''} gap-4 relative z-10 mb-6`}>
 
                 {/* Events */}
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
@@ -644,10 +698,72 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 )}
             </div>
 
-            {/* 3. ALERTS STACK (Anti-Tilt, Smart Breath, Rescue, Early Closure) */}
+            {/* GATEKEEPER: PRE-TRADE CHECKLIST */}
+            {
+                !isTargetReached && !isFailed && (
+                    <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden">
+                        <div className="flex justify-between items-center mb-5">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                                    <ClipboardCheck size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-black text-white uppercase tracking-wider">Gatekeeper Checklist</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Rituale di Disciplina</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 bg-slate-900/60 px-4 py-2 rounded-2xl border border-slate-700/50">
+                                <Globe size={14} className="text-slate-500" />
+                                <input
+                                    type="text"
+                                    placeholder="EURUSD, NASDAQ..."
+                                    value={activePair}
+                                    onChange={(e) => setActivePair(e.target.value.toUpperCase())}
+                                    className="bg-transparent text-xs font-black text-blue-400 placeholder:text-slate-600 outline-none w-24 tracking-widest"
+                                />
+                            </div>
+                        </div>
 
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-2">
+                            {(config.checklistTemplate || []).map((item) => (
+                                <div
+                                    key={item}
+                                    onClick={() => toggleChecklistItem(item)}
+                                    className={`
+                                    group cursor-pointer p-4 rounded-2xl border-2 transition-all duration-300
+                                    ${checklist[item]
+                                            ? 'bg-emerald-500/10 border-emerald-500/30'
+                                            : 'bg-slate-900 border-slate-800 hover:border-slate-700'}
+                                `}
+                                >
+                                    <div className="flex items-center gap-4">
+                                        <div className={`
+                                        w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all duration-300
+                                        ${checklist[item]
+                                                ? 'bg-emerald-500 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                                : 'border-slate-700 group-hover:border-slate-500'}
+                                    `}>
+                                            {checklist[item] && <span className="text-white text-xs font-black">✓</span>}
+                                        </div>
+                                        <span className={`text-xs font-bold transition-colors ${checklist[item] ? 'text-emerald-100' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                                            {item}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
 
-
+                        {!isChecklistComplete && (config.checklistTemplate || []).length > 0 && (
+                            <div className="mt-4 flex items-center gap-3 bg-orange-500/5 p-3 rounded-2xl border border-orange-500/20">
+                                <AlertOctagon size={16} className="text-orange-500" />
+                                <p className="text-[10px] font-bold text-orange-400/80 uppercase tracking-wider">
+                                    Checklist incompleta: la disciplina batte il caso. Sicuro di voler procedere?
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )
+            }
 
             {/* 4. BET & ACTIONS CONTAINER (Side-by-side) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -692,54 +808,73 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 </div>
 
                 {/* RIGHT: ACTIONS (Win/Loss Buttons) */}
-                <div className="grid grid-cols-2 gap-3">
-                    {/* 1. VINTA (Top-Left) */}
-                    <button
-                        onClick={() => onFullBet(true, currentQuota)}
-                        className="group relative overflow-hidden py-4 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-lg shadow-xl border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all"
-                    >
-                        <div className="flex flex-col items-center">
-                            <span className="flex items-center gap-2"><CheckCircle size={18} /> VINTA</span>
-                            <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold">100% TARGET</span>
+                <div className="relative">
+                    {currentPlan.role === 'slave' && currentPlan.feedSource?.isPaused && (
+                        <div className="absolute inset-0 z-20 bg-slate-900/60 backdrop-blur-[2px] rounded-2xl flex flex-col items-center justify-center p-4 text-center border-2 border-dashed border-red-500/30">
+                            <ShieldAlert className="text-red-500 mb-2" size={32} />
+                            <div className="text-sm font-black text-white uppercase tracking-wider">PIANO IN PAUSA</div>
+                            <div className="text-[10px] text-red-200/80 font-bold uppercase mt-1">Virtual Buffer Esaurito</div>
                         </div>
-                    </button>
+                    )}
+                    <div className={`grid grid-cols-2 gap-3 h-full ${currentPlan.role === 'slave' && currentPlan.feedSource?.isPaused ? 'opacity-30 pointer-events-none grayscale' : ''}`}>
+                        {/* 1. VINTA (Top-Left) */}
+                        <button
+                            onClick={() => {
+                                onFullBet(true, currentQuota, activePair, checklist);
+                                resetChecklist();
+                            }}
+                            className="group relative overflow-hidden py-4 bg-gradient-to-br from-green-600 to-emerald-700 hover:from-green-500 hover:to-emerald-600 rounded-2xl font-black text-lg shadow-xl border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all"
+                        >
+                            <div className="flex flex-col items-center">
+                                <span className="flex items-center gap-2 text-white"><CheckCircle size={18} /> VINTA</span>
+                                <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold text-green-100">100% TARGET</span>
+                            </div>
+                        </button>
 
-                    {/* 2. PERSA (Top-Right) */}
-                    <button
-                        onClick={() => onFullBet(false, currentQuota)}
-                        className="group relative overflow-hidden py-4 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-lg shadow-xl border-b-4 border-red-900 active:border-b-0 active:translate-y-1 transition-all"
-                    >
-                        <div className="flex flex-col items-center text-white">
-                            <span className="flex items-center gap-2"><XCircle size={18} /> PERSA</span>
-                            <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">Loss Totale</span>
-                        </div>
-                    </button>
+                        {/* 2. PERSA (Top-Right) */}
+                        <button
+                            onClick={() => {
+                                onFullBet(false, currentQuota, activePair, checklist);
+                                resetChecklist();
+                            }}
+                            className="group relative overflow-hidden py-4 bg-gradient-to-br from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 rounded-2xl font-black text-lg shadow-xl border-b-4 border-red-900 active:border-b-0 active:translate-y-1 transition-all"
+                        >
+                            <div className="flex flex-col items-center text-white">
+                                <span className="flex items-center gap-2"><XCircle size={18} /> PERSA</span>
+                                <span className="text-[9px] opacity-70 tracking-[0.1em] font-bold uppercase">Loss Totale</span>
+                            </div>
+                        </button>
 
-                    {/* 3. VINCITA PARZIALE (Tesoretto) */}
-                    <button
-                        onClick={() => onPartialWin(currentQuota)}
-                        className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl"
-                    >
-                        <div className="flex flex-col items-center">
-                            <span className="flex items-center gap-2 text-green-400"><TrendingUp size={18} /> TESORETTO</span>
-                            <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">VINTA 50% (+$$)</span>
-                        </div>
-                    </button>
+                        {/* 3. VINCITA PARZIALE (Tesoretto) */}
+                        <button
+                            onClick={() => {
+                                onPartialWin(currentQuota, activePair, checklist);
+                                resetChecklist();
+                            }}
+                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl"
+                        >
+                            <div className="flex flex-col items-center">
+                                <span className="flex items-center gap-2 text-green-400"><TrendingUp size={18} /> TESORETTO</span>
+                                <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">VINTA 50% (+$$)</span>
+                            </div>
+                        </button>
 
-                    {/* 4. SCONFITTA PARZIALE (Errore) */}
-                    <button
-                        onClick={() => onPartialLoss(currentQuota)}
-                        className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl"
-                    >
-                        <div className="flex flex-col items-center">
-                            <span className="flex items-center gap-1.5 text-red-500"><TrendingDown size={18} /> ERRORE</span>
-                            <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">PERSA 50% (-$$)</span>
-                        </div>
-                    </button>
+                        {/* 4. SCONFITTA PARZIALE (Errore) */}
+                        <button
+                            onClick={() => {
+                                onPartialLoss(currentQuota, activePair, checklist);
+                                resetChecklist();
+                            }}
+                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl"
+                        >
+                            <div className="flex flex-col items-center">
+                                <span className="flex items-center gap-1.5 text-red-500"><TrendingDown size={18} /> ERRORE</span>
+                                <span className="text-[9px] text-slate-500 tracking-[0.1em] font-bold uppercase">PERSA 50% (-$$)</span>
+                            </div>
+                        </button>
+                    </div>
                 </div>
             </div>
-
-
 
             {/* 7. TRADING DASHBOARD */}
             <div className="p-4 bg-slate-900/60 border border-slate-700/50 rounded-2xl">
@@ -803,18 +938,6 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     />
                 </div>
             </div>
-
-            <DebugRules
-                plan={currentPlan}
-                activeRules={activeRules}
-                config={{
-                    ...currentPlan,
-                    initialCapital: currentPlan.startCapital,
-                    weeklyTargetPercentage: 20,
-                    milestoneBankPercentage: 20,
-                    accumulationPercent: 50
-                }}
-            />
         </div>
     );
 };

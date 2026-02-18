@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
-import { DollarSign, Plus, TrendingUp, History } from 'lucide-react';
+import { DollarSign, Plus, History, X } from 'lucide-react';
 import type { CapitalPool } from '../types/masaniello';
 
 interface CapitalPoolManagerProps {
     pool: CapitalPool;
     onAddCapital: (amount: number) => void;
+    onSetAvailable: (amount: number) => void;
+    onClose?: () => void;
 }
 
-const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapital }) => {
+const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapital, onSetAvailable, onClose }) => {
     const [showAddForm, setShowAddForm] = useState(false);
     const [amount, setAmount] = useState(1000);
     const [showHistory, setShowHistory] = useState(false);
+    const [editingAvailable, setEditingAvailable] = useState(false);
+    const [availableValue, setAvailableValue] = useState(pool.totalAvailable);
 
     const handleAdd = () => {
         if (amount <= 0) {
@@ -22,67 +26,221 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
         setAmount(1000);
     };
 
+    const handleEditAvailable = () => {
+        setEditingAvailable(true);
+        setAvailableValue(pool.totalAvailable);
+    };
+
+    const handleSaveAvailable = () => {
+        if (availableValue < 0) {
+            alert('Il capitale disponibile non può essere negativo');
+            return;
+        }
+        onSetAvailable(availableValue);
+        setEditingAvailable(false);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingAvailable(false);
+        setAvailableValue(pool.totalAvailable);
+    };
+
     const totalAllocated = Object.values(pool.allocations).reduce((sum, val) => sum + val, 0);
 
     return (
-        <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg">
-            <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                    <div className="bg-blue-500/20 p-3 rounded-lg">
-                        <DollarSign size={24} className="text-blue-400" />
+        <div className="card-body-redesign">
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                        width: '48px',
+                        height: '48px',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'linear-gradient(135deg, var(--accent-blue), var(--accent-teal))',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: 'var(--shadow-glow-blue)'
+                    }}>
+                        <DollarSign size={24} color="#fff" />
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold text-white">Pool Capitale</h3>
-                        <p className="text-xs text-slate-400">Gestione capitale comune</p>
+                        <h3 className="font-display" style={{ fontSize: '16px', fontWeight: 700, marginBottom: '2px' }}>
+                            Pool Capitale
+                        </h3>
+                        <p className="text-xs" style={{ color: 'var(--txt-muted)' }}>
+                            Gestione capitale comune
+                        </p>
                     </div>
                 </div>
 
-                <button
-                    onClick={() => setShowAddForm(!showAddForm)}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-bold flex items-center gap-2 transition-colors"
-                >
-                    <Plus size={16} />
-                    AGGIUNGI
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                        onClick={() => setShowAddForm(!showAddForm)}
+                        className="btn btn-primary"
+                    >
+                        <Plus size={16} />
+                        AGGIUNGI
+                    </button>
+                    {onClose && (
+                        <button
+                            onClick={onClose}
+                            className="btn btn-ghost"
+                            style={{
+                                width: '38px',
+                                height: '38px',
+                                padding: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: 'var(--radius-md)',
+                                background: 'rgba(255,255,255,0.05)'
+                            }}
+                        >
+                            <X size={18} />
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-                    <p className="text-xs text-slate-400 mb-1">Disponibile</p>
-                    <p className="text-lg font-black text-blue-400">€{pool.totalAvailable.toFixed(2)}</p>
+            {/* Stats Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+                {/* Disponibile (editable) */}
+                <div
+                    style={{
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '14px 16px',
+                        cursor: editingAvailable ? 'default' : 'pointer',
+                        transition: 'all var(--transition-base)'
+                    }}
+                    onClick={!editingAvailable ? handleEditAvailable : undefined}
+                    onMouseEnter={(e) => !editingAvailable && (e.currentTarget.style.borderColor = 'var(--border-hover)')}
+                    onMouseLeave={(e) => !editingAvailable && (e.currentTarget.style.borderColor = 'var(--border)')}
+                >
+                    <div className="stat-label-redesign">
+                        Disponibile {!editingAvailable && <span style={{ fontSize: '9px', opacity: 0.5 }}>(click)</span>}
+                    </div>
+                    {editingAvailable ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginTop: '6px' }}>
+                            <input
+                                type="number"
+                                value={availableValue}
+                                onChange={(e) => setAvailableValue(Number(e.target.value))}
+                                className="font-mono"
+                                style={{
+                                    width: '100px',
+                                    padding: '4px 8px',
+                                    background: 'var(--bg-elevated)',
+                                    border: '1px solid var(--accent-blue)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    color: 'var(--txt-primary)',
+                                    fontSize: '13px',
+                                    fontWeight: 500
+                                }}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveAvailable();
+                                    if (e.key === 'Escape') handleCancelEdit();
+                                }}
+                            />
+                            <button
+                                onClick={handleSaveAvailable}
+                                style={{
+                                    padding: '4px 8px',
+                                    background: 'var(--accent-green)',
+                                    border: 'none',
+                                    borderRadius: 'var(--radius-sm)',
+                                    color: '#fff',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ✓
+                            </button>
+                            <button
+                                onClick={handleCancelEdit}
+                                style={{
+                                    padding: '4px 8px',
+                                    background: 'var(--accent-red)',
+                                    border: 'none',
+                                    borderRadius: 'var(--radius-sm)',
+                                    color: '#fff',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="stat-value-redesign" style={{ color: 'var(--accent-blue)', marginTop: '6px' }}>
+                            €{pool.totalAvailable.toFixed(2)}
+                        </div>
+                    )}
                 </div>
 
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-                    <p className="text-xs text-slate-400 mb-1">Allocato</p>
-                    <p className="text-lg font-black text-green-400">€{totalAllocated.toFixed(2)}</p>
+                {/* Allocato */}
+                <div style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '14px 16px'
+                }}>
+                    <div className="stat-label-redesign">Allocato</div>
+                    <div className="stat-value-redesign stat-value-pos" style={{ marginTop: '6px' }}>
+                        €{totalAllocated.toFixed(2)}
+                    </div>
                 </div>
 
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-                    <p className="text-xs text-slate-400 mb-1">Totale</p>
-                    <p className="text-lg font-black text-white">€{(pool.totalAvailable + totalAllocated).toFixed(2)}</p>
+                {/* Totale */}
+                <div style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '14px 16px'
+                }}>
+                    <div className="stat-label-redesign">Totale</div>
+                    <div className="stat-value-redesign" style={{ marginTop: '6px' }}>
+                        €{(pool.totalAvailable + totalAllocated).toFixed(2)}
+                    </div>
                 </div>
             </div>
 
             {/* Add Form */}
             {showAddForm && (
-                <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700 mb-4">
-                    <label className="block text-xs font-bold text-slate-300 mb-2">
+                <div style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '16px',
+                    marginBottom: '20px'
+                }}>
+                    <label className="stat-label-redesign" style={{ display: 'block', marginBottom: '8px' }}>
                         Importo da Aggiungere (€)
                     </label>
-                    <div className="flex gap-2">
+                    <div style={{ display: 'flex', gap: '8px' }}>
                         <input
                             type="number"
                             value={amount}
                             onChange={(e) => setAmount(Number(e.target.value))}
                             min={1}
                             step={100}
-                            className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                            className="font-mono"
+                            style={{
+                                flex: 1,
+                                padding: '8px 12px',
+                                background: 'var(--bg-elevated)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 'var(--radius-sm)',
+                                color: 'var(--txt-primary)',
+                                fontSize: '14px'
+                            }}
                         />
-                        <button
-                            onClick={handleAdd}
-                            className="px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white text-sm font-bold transition-colors"
-                        >
+                        <button onClick={handleAdd} className="btn btn-success">
                             CONFERMA
                         </button>
                     </div>
@@ -91,13 +249,30 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
 
             {/* Allocations */}
             {Object.keys(pool.allocations).length > 0 && (
-                <div className="mb-4">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Allocazioni Attive</h4>
-                    <div className="space-y-2">
+                <div style={{ marginBottom: '20px' }}>
+                    <h4 className="stat-label-redesign" style={{ marginBottom: '12px' }}>
+                        Allocazioni Attive
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {Object.entries(pool.allocations).map(([masaId, allocated]) => (
-                            <div key={masaId} className="flex items-center justify-between bg-slate-900/30 rounded-lg p-2 border border-slate-700">
-                                <span className="text-xs text-slate-300 font-bold">{masaId.replace('_', ' #').toUpperCase()}</span>
-                                <span className="text-sm font-black text-green-400">€{allocated.toFixed(2)}</span>
+                            <div
+                                key={masaId}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    background: 'var(--bg-surface)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: 'var(--radius-md)',
+                                    padding: '10px 14px'
+                                }}
+                            >
+                                <span className="text-xs font-mono" style={{ color: 'var(--txt-secondary)', fontWeight: 600 }}>
+                                    {masaId.replace('_', ' #').toUpperCase()}
+                                </span>
+                                <span className="font-mono stat-value-pos" style={{ fontSize: '14px' }}>
+                                    €{allocated.toFixed(2)}
+                                </span>
                             </div>
                         ))}
                     </div>
@@ -107,7 +282,8 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
             {/* History Toggle */}
             <button
                 onClick={() => setShowHistory(!showHistory)}
-                className="w-full px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                className="btn btn-ghost"
+                style={{ width: '100%', justifyContent: 'center' }}
             >
                 <History size={14} />
                 {showHistory ? 'NASCONDI' : 'MOSTRA'} STORICO TRANSAZIONI
@@ -115,24 +291,41 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
 
             {/* Transaction History */}
             {showHistory && pool.history.length > 0 && (
-                <div className="mt-4 max-h-60 overflow-y-auto">
-                    <div className="space-y-2">
+                <div style={{ marginTop: '16px', maxHeight: '300px', overflowY: 'auto' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {pool.history.slice().reverse().map((tx) => (
-                            <div key={tx.id} className="bg-slate-900/30 rounded-lg p-3 border border-slate-700">
-                                <div className="flex items-center justify-between mb-1">
-                                    <span className={`text-xs font-bold ${tx.type === 'allocation' ? 'text-green-400' :
-                                            tx.type === 'release' ? 'text-blue-400' :
-                                                'text-yellow-400'
-                                        }`}>
+                            <div
+                                key={tx.id}
+                                style={{
+                                    background: 'var(--bg-surface)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: 'var(--radius-md)',
+                                    padding: '12px 14px'
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span
+                                        className="text-xs font-mono"
+                                        style={{
+                                            color: tx.type === 'allocation' ? 'var(--accent-green)' :
+                                                tx.type === 'release' ? 'var(--accent-blue)' :
+                                                    'var(--accent-gold)',
+                                            fontWeight: 600
+                                        }}
+                                    >
                                         {tx.type === 'allocation' ? '+ ALLOCAZIONE' :
                                             tx.type === 'release' ? '↩ RILASCIO' :
                                                 '⇄ TRASFERIMENTO'}
                                     </span>
-                                    <span className="text-xs font-black text-white">€{tx.amount.toFixed(2)}</span>
+                                    <span className="font-mono" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--txt-primary)' }}>
+                                        €{tx.amount.toFixed(2)}
+                                    </span>
                                 </div>
-                                <p className="text-[10px] text-slate-400">{tx.description}</p>
-                                <p className="text-[9px] text-slate-500 mt-1">
-                                    {new Date(tx.timestamp).toLocaleString()}
+                                <p className="text-xs" style={{ color: 'var(--txt-secondary)', marginBottom: '4px' }}>
+                                    {tx.description}
+                                </p>
+                                <p className="text-xs font-mono" style={{ color: 'var(--txt-muted)', fontSize: '10px' }}>
+                                    {new Date(tx.timestamp).toLocaleString('it-IT')}
                                 </p>
                             </div>
                         ))}

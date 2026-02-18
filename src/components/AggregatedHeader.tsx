@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, PiggyBank, DollarSign, Activity } from 'lucide-react';
+import { PiggyBank, DollarSign, Activity } from 'lucide-react';
 import type { AggregatedStats } from '../types/masaniello';
 
 interface AggregatedHeaderProps {
@@ -16,10 +16,21 @@ const AggregatedHeader: React.FC<AggregatedHeaderProps> = ({ stats, poolCapital 
             </h2>
 
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {/* Total Capital */}
+                <div className="bg-slate-900/50 rounded-lg p-3 border border-blue-500/30">
+                    <div className="flex items-center gap-2 mb-1">
+                        <DollarSign size={14} className="text-blue-400" />
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Total Capital</span>
+                    </div>
+                    <p className="text-xl font-black text-white">
+                        €{(stats.totalWorth + stats.totalBanked).toFixed(2)}
+                    </p>
+                </div>
+
                 {/* Total Worth */}
                 <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
                     <div className="flex items-center gap-2 mb-1">
-                        <DollarSign size={14} className="text-green-400" />
+                        <Activity size={14} className="text-green-400" />
                         <span className="text-[10px] text-slate-400 uppercase font-bold">Total Worth</span>
                     </div>
                     <p className="text-xl font-black text-white">
@@ -38,57 +49,50 @@ const AggregatedHeader: React.FC<AggregatedHeaderProps> = ({ stats, poolCapital 
                     </p>
                 </div>
 
-                {/* Total Profit */}
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                {/* Targets Raggiunti */}
+                <div className="bg-slate-900/50 rounded-lg p-3 border border-teal-500/30">
                     <div className="flex items-center gap-2 mb-1">
-                        <TrendingUp size={14} className={stats.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'} />
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Total Profit</span>
+                        <Activity size={14} className="text-teal-400" />
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Targets</span>
                     </div>
-                    <p className={`text-xl font-black ${stats.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {stats.totalProfit >= 0 ? '+' : ''}€{stats.totalProfit.toFixed(2)}
-                    </p>
-                </div>
-
-                {/* Growth */}
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-                    <div className="flex items-center gap-2 mb-1">
-                        <TrendingUp size={14} className={stats.totalGrowth >= 0 ? 'text-green-400' : 'text-red-400'} />
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Growth</span>
-                    </div>
-                    <p className={`text-xl font-black ${stats.totalGrowth >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {stats.totalGrowth >= 0 ? '+' : ''}{stats.totalGrowth.toFixed(2)}%
+                    <p className="text-xl font-black text-teal-400">
+                        {stats.totalWeeklyTargetsReached}
                     </p>
                 </div>
 
                 {/* Pool Capital */}
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-blue-700/50">
+                <div className="bg-slate-900/50 rounded-lg p-3 border border-yellow-700/50">
                     <div className="flex items-center gap-2 mb-1">
-                        <DollarSign size={14} className="text-blue-400" />
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Pool Disponibile</span>
+                        <DollarSign size={14} className="text-yellow-400" />
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Pool</span>
                     </div>
-                    <p className="text-xl font-black text-blue-400">
+                    <p className="text-xl font-black text-yellow-400">
                         €{poolCapital.toFixed(2)}
                     </p>
                 </div>
             </div>
 
-            {/* Win/Loss Stats */}
-            <div className="mt-3 flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-2">
-                    <span className="text-slate-400">Vittorie:</span>
-                    <span className="font-bold text-green-400">{stats.totalWins}</span>
+            {/* Performance Detail Row */}
+            <div className="mt-3 flex items-center justify-between">
+                <div className="flex items-center gap-4 text-xs">
+                    <div className="flex items-center gap-2">
+                        <span className="text-slate-400">Profitto:</span>
+                        <span className={`font-bold ${stats.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {stats.totalProfit >= 0 ? '+' : ''}€{stats.totalProfit.toFixed(2)}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-slate-400">Crescita:</span>
+                        <span className={`font-bold ${stats.totalGrowth >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {stats.totalGrowth >= 0 ? '+' : ''}{stats.totalGrowth.toFixed(2)}%
+                        </span>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-slate-400">Perdite:</span>
-                    <span className="font-bold text-red-400">{stats.totalLosses}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-slate-400">Win Rate:</span>
-                    <span className="font-bold text-white">
-                        {stats.totalWins + stats.totalLosses > 0
-                            ? ((stats.totalWins / (stats.totalWins + stats.totalLosses)) * 100).toFixed(1)
-                            : 0}%
-                    </span>
+
+                <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-slate-500">
+                    <span className="text-green-500/80">{stats.totalWins} Vittorie</span>
+                    <span className="opacity-30">|</span>
+                    <span className="text-red-500/80">{stats.totalLosses} Perdite</span>
                 </div>
             </div>
         </div>

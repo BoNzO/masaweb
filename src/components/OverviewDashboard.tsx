@@ -1,10 +1,10 @@
-import React from 'react';
-import { TrendingUp, Target, PiggyBank, Activity } from 'lucide-react';
+import { TrendingUp, PiggyBank, Activity, RefreshCw, Wallet } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, CartesianGrid, XAxis, YAxis, Tooltip, Area } from 'recharts';
 import type { AggregatedStats } from '../types/masaniello';
 
 interface OverviewDashboardProps {
     stats: AggregatedStats;
+    onReset?: () => void;
 }
 
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
@@ -19,15 +19,42 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] 
     return null;
 };
 
-const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ stats }) => {
-    const winRate = stats.totalWins + stats.totalLosses > 0
-        ? (stats.totalWins / (stats.totalWins + stats.totalLosses)) * 100
-        : 0;
+const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ stats, onReset }) => {
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fade-up">
+            <div className="flex justify-between items-center mb-2">
+                <div>
+                    <h2 className="text-2xl font-black text-white tracking-tight uppercase">Dashboard Overview</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sintesi globale delle performance</p>
+                </div>
+                {onReset && (
+                    <button
+                        onClick={onReset}
+                        className="group flex items-center gap-2 px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-xl text-rose-400 text-xs font-black uppercase tracking-wider transition-all active:scale-95"
+                    >
+                        <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                        Reset Sistema
+                    </button>
+                )}
+            </div>
             {/* Main Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                {/* Initial Capital Card */}
+                <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg">
+                    <div className="flex items-center gap-3 mb-3">
+                        <div className="bg-blue-500/20 p-3 rounded-lg">
+                            <Wallet size={24} className="text-blue-400" />
+                        </div>
+                        <div>
+                            <p className="text-xs text-slate-400 uppercase font-bold">Initial Capital</p>
+                            <p className="text-2xl font-black text-white">€{stats.totalInitialCapital.toFixed(2)}</p>
+                        </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        Capitale di partenza allocato
+                    </div>
+                </div>
                 {/* Total Worth Card */}
                 <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg">
                     <div className="flex items-center gap-3 mb-3">
@@ -40,7 +67,7 @@ const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ stats }) => {
                         </div>
                     </div>
                     <div className="text-xs text-slate-500">
-                        Capitale totale di tutti i Masanielli attivi
+                        Capitale attivo + Banked
                     </div>
                 </div>
 
@@ -74,23 +101,41 @@ const OverviewDashboard: React.FC<OverviewDashboardProps> = ({ stats }) => {
                         </div>
                     </div>
                     <div className="text-xs text-slate-500">
-                        Capitale accantonato in sicurezza
+                        Capitale accantonato
                     </div>
                 </div>
 
-                {/* Win Rate Card */}
-                <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg">
-                    <div className="flex items-center gap-3 mb-3">
+                {/* Total Capital Card */}
+                <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+                    <div className="flex items-center gap-3 mb-3 relative z-10">
                         <div className="bg-blue-500/20 p-3 rounded-lg">
-                            <Target size={24} className="text-blue-400" />
+                            <Wallet size={24} className="text-blue-400" />
                         </div>
                         <div>
-                            <p className="text-xs text-slate-400 uppercase font-bold">Win Rate</p>
-                            <p className="text-2xl font-black text-white">{winRate.toFixed(1)}%</p>
+                            <p className="text-xs text-slate-400 uppercase font-bold">Total Capital</p>
+                            <p className="text-2xl font-black text-white">€{(stats.totalWorth + stats.totalBanked).toFixed(2)}</p>
                         </div>
                     </div>
-                    <div className="text-xs text-slate-500">
-                        {stats.totalWins}W / {stats.totalLosses}L
+                    <div className="text-xs text-slate-500 relative z-10">
+                        Worth + Banked
+                    </div>
+                </div>
+
+                {/* Targets Raggiunti Card */}
+                <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+                    <div className="flex items-center gap-3 mb-3 relative z-10">
+                        <div className="bg-teal-500/20 p-3 rounded-lg">
+                            <PiggyBank size={24} className="text-teal-400" />
+                        </div>
+                        <div>
+                            <p className="text-xs text-slate-400 uppercase font-bold">Target Raggiunti</p>
+                            <p className="text-3xl font-black text-teal-400">{stats.totalWeeklyTargetsReached}</p>
+                        </div>
+                    </div>
+                    <div className="text-xs text-slate-500 relative z-10">
+                        Cicli settimanali completati
                     </div>
                 </div>
             </div>

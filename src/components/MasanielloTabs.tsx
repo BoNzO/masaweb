@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, LayoutDashboard } from 'lucide-react';
+import { Crown, Link as LinkIcon } from 'lucide-react';
 import type { MasanielloInstance } from '../types/masaniello';
 
 interface MasanielloTabsProps {
@@ -8,6 +8,12 @@ interface MasanielloTabsProps {
     currentViewId: string;
     onSelectView: (viewId: string) => void;
     canCreateNew: boolean;
+    onToggleConfig?: () => void;
+    onReset?: (id: string) => void;
+    onClone?: (id: string) => void;
+    onArchive?: (id: string) => void;
+    onDelete?: (id: string) => void;
+    onCloseCycle?: (id: string) => void;
 }
 
 const MasanielloTabs: React.FC<MasanielloTabsProps> = ({
@@ -15,79 +21,107 @@ const MasanielloTabs: React.FC<MasanielloTabsProps> = ({
     activeIds,
     currentViewId,
     onSelectView,
-    canCreateNew
+    canCreateNew,
+    onToggleConfig,
+    onReset,
+    onClone,
+    onArchive,
+    onDelete,
+    onCloseCycle
 }) => {
     const activeInstances = activeIds.map(id => instances[id]).filter(Boolean);
 
-
     return (
-        <div className="mb-6">
-            <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                {/* Overview Tab */}
-                <button
-                    onClick={() => onSelectView('overview')}
-                    className={`px-4 py-2.5 rounded-lg font-bold text-xs flex flex-col items-start gap-1 transition-all min-w-[140px] ${currentViewId === 'overview'
-                        ? 'bg-indigo-600 text-white shadow-lg'
-                        : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                        }`}
-                >
-                    <div className="flex items-center gap-2">
-                        <LayoutDashboard size={14} />
-                        <span>OVERVIEW</span>
-                    </div>
-                    <div className="text-[10px] opacity-70">
-                        Aggregato
-                    </div>
-                </button>
+        <div className="tabs-bar">
+            {/* Overview Tab */}
+            <button
+                onClick={() => onSelectView('overview')}
+                className={`tab ${currentViewId === 'overview' ? 'active' : ''}`}
+                style={{ fontSize: '12px', padding: '10px 14px 11px', letterSpacing: '0.05em' }}
+            >
+                ⊞ Overview
+            </button>
 
-                {/* Active Masaniello Tabs */}
-                {activeInstances.map(instance => {
-                    const currentCapital = instance.currentPlan?.currentCapital || instance.absoluteStartCapital;
-                    const banked = instance.history.reduce((sum, plan) => sum + (plan.accumulatedAmount || 0), 0);
-                    const profit = (currentCapital + banked) - instance.absoluteStartCapital;
-                    const isProfit = profit >= 0;
+            {/* Active Masaniello Tabs */}
+            {activeInstances.map(instance => {
+                const role = instance.config.role || instance.currentPlan?.role || 'standard';
+                const isMaster = role === 'master';
+                const isSlave = role === 'slave';
 
-                    return (
-                        <button
-                            key={instance.id}
-                            onClick={() => onSelectView(instance.id)}
-                            className={`px-4 py-2.5 rounded-lg font-bold text-xs flex flex-col items-start gap-1 transition-all min-w-[140px] ${currentViewId === instance.id
-                                ? 'bg-blue-600 text-white shadow-lg'
-                                : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                                }`}
-                        >
-                            <div className="flex items-center justify-between w-full">
-                                <span>{instance.name}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px]">
-                                <span className={isProfit ? 'text-green-300' : 'text-red-300'}>
-                                    {isProfit ? '+' : ''}€{profit.toFixed(0)}
-                                </span>
-                                {banked > 0 && (
-                                    <span className="text-yellow-300">
-                                        🏦 €{banked.toFixed(0)}
-                                    </span>
-                                )}
-                            </div>
-                        </button>
-                    );
-                })}
-
-                {/* New Masaniello Tab (+ button) */}
-                {canCreateNew && (
+                return (
                     <button
-                        onClick={() => onSelectView('new')}
-                        className={`px-4 py-2.5 rounded-lg font-bold text-xs flex items-center gap-2 transition-all whitespace-nowrap ${currentViewId === 'new'
-                            ? 'bg-green-600 text-white shadow-lg'
-                            : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700 border-2 border-dashed border-slate-600'
-                            }`}
+                        key={instance.id}
+                        onClick={() => onSelectView(instance.id)}
+                        className={`tab ${currentViewId === instance.id ? 'active' : ''}`}
                     >
-                        <Plus size={16} />
-                        NUOVO
+                        {isMaster && <Crown size={12} />}
+                        {isSlave && <LinkIcon size={12} />}
+                        {instance.name}
+                        {isMaster && <span className="tab-badge master">MASTER</span>}
+                        {isSlave && <span className="tab-badge slave">SLAVE</span>}
                     </button>
+                );
+            })}
+
+            {/* New Tab Button */}
+            {canCreateNew && (
+                <button
+                    onClick={() => onSelectView('new')}
+                    className="tab-add"
+                    title="Nuovo ciclo"
+                >
+                    +
+                </button>
+            )}
+
+            {/* Action Buttons (right side) */}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', paddingBottom: '1px' }}>
+                {currentViewId !== 'overview' && currentViewId !== 'new' && (
+                    <>
+                        <button
+                            className="btn btn-ghost"
+                            style={{ padding: '6px 14px', fontSize: '12px' }}
+                            onClick={() => onToggleConfig?.()}
+                        >
+                            ⚙ Config
+                        </button>
+                        <button
+                            className="btn btn-ghost"
+                            style={{ padding: '6px 14px', fontSize: '12px', color: 'var(--accent-teal)' }}
+                            onClick={() => onReset?.(currentViewId)}
+                        >
+                            ↺ Reset
+                        </button>
+                        <button
+                            className="btn btn-ghost"
+                            style={{ padding: '6px 14px', fontSize: '12px' }}
+                            onClick={() => onClone?.(currentViewId)}
+                        >
+                            ⊡ Clona
+                        </button>
+                        <button
+                            className="btn btn-ghost"
+                            style={{ padding: '6px 14px', fontSize: '12px' }}
+                            onClick={() => onArchive?.(currentViewId)}
+                        >
+                            ✦ Archivia
+                        </button>
+                        <button
+                            className="btn btn-danger-soft"
+                            style={{ padding: '6px 14px', fontSize: '12px' }}
+                            onClick={() => onDelete?.(currentViewId)}
+                        >
+                            ✕ Elimina
+                        </button>
+                        <button
+                            className="btn btn-primary"
+                            style={{ padding: '6px 18px', fontSize: '12px' }}
+                            onClick={() => onCloseCycle?.(currentViewId)}
+                        >
+                            ◎ Chiudi Ciclo
+                        </button>
+                    </>
                 )}
-
-
             </div>
         </div>
     );
