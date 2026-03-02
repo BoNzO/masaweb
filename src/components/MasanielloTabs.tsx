@@ -1,5 +1,5 @@
 import React from 'react';
-import { Crown, Link as LinkIcon, Shield } from 'lucide-react';
+import { Shield } from 'lucide-react';
 import type { MasanielloInstance } from '../types/masaniello';
 
 interface MasanielloTabsProps {
@@ -44,22 +44,14 @@ const MasanielloTabs: React.FC<MasanielloTabsProps> = ({
 
             {/* Active Masaniello Tabs */}
             {activeInstances.map(instance => {
-                const role = instance.config.role || instance.currentPlan?.role || 'standard';
-                const isMaster = role === 'master';
-                const isSlave = role === 'slave';
-
                 return (
                     <button
                         key={instance.id}
                         onClick={() => onSelectView(instance.id)}
                         className={`tab ${currentViewId === instance.id ? 'active' : ''}`}
                     >
-                        {isMaster && <Crown size={12} />}
-                        {isSlave && <LinkIcon size={12} />}
                         {(instance.currentPlan?.hierarchyType === 'FATHER' || instance.currentPlan?.hierarchyType === 'SON') && <Shield size={12} className={instance.currentPlan?.hierarchyType === 'FATHER' ? 'text-blue-400' : 'text-indigo-400'} />}
                         {instance.name}
-                        {isMaster && <span className="tab-badge master">MASTER</span>}
-                        {isSlave && <span className="tab-badge slave">SLAVE</span>}
                         {instance.currentPlan?.hierarchyType === 'FATHER' && <span className="tab-badge" style={{ background: 'rgba(59,130,246,0.2)', color: '#60a5fa', border: '1px solid rgba(59,130,246,0.3)' }}>PADRE</span>}
                         {instance.currentPlan?.hierarchyType === 'SON' && <span className="tab-badge" style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>FIGLIO</span>}
                     </button>

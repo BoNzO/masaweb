@@ -26,14 +26,7 @@ const TopBar: React.FC<TopBarProps> = ({ stats, poolCapital, onTogglePool, onRes
                     <div className="kpi-label">INITIAL</div>
                     <div className="kpi-value" style={{ color: '#3b82f6' }}>€{Math.ceil(stats.totalInitialCapital).toLocaleString('it-IT')}</div>
                 </div>
-                <div className="kpi-pill">
-                    <div className="kpi-label">MASTER</div>
-                    <div className="kpi-value" style={{ color: '#ffffff' }}>€{Math.ceil(stats.totalMasterCapital).toLocaleString('it-IT')}</div>
-                </div>
-                <div className="kpi-pill">
-                    <div className="kpi-label">SLAVE</div>
-                    <div className="kpi-value" style={{ color: '#ffffff' }}>€{Math.ceil(stats.totalSlaveCapital).toLocaleString('it-IT')}</div>
-                </div>
+
                 <div className="kpi-pill">
                     <div className="kpi-label">BANKED</div>
                     <div className="kpi-value gold">€{Math.ceil(stats.totalBanked).toLocaleString('it-IT')}</div>

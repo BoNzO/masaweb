@@ -320,6 +320,26 @@ export const calculateMasanielloHealth = (
     };
 };
 
+export const calculateTwinHealth = (planLong: any, planShort: any) => {
+    const healthLong = calculateMasanielloHealth(planLong);
+    const healthShort = calculateMasanielloHealth(planShort);
+
+    // Aggregate score is mostly the worst of the two
+    let aggregateScore = Math.max(healthLong.score, healthShort.score);
+
+    // Drawdown penalty: if BOTH are below start capital, the risk is systemic
+    if (planLong.currentCapital < planLong.startCapital && planShort.currentCapital < planShort.startCapital) {
+        aggregateScore = Math.min(100, aggregateScore + 15);
+    }
+
+    return {
+        score: Math.min(100, Math.round(aggregateScore)),
+        long: healthLong,
+        short: healthShort,
+        isEmergency: healthLong.isEmergency || healthShort.isEmergency
+    };
+};
+
 export const getRescueAdvisory = (
     plan: {
         startCapital: number;

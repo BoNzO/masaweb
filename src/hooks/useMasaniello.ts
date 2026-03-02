@@ -242,7 +242,9 @@ export const useMasaniello = (
         // 1. END OF CYCLE BANKING (Aggregated)
         const isEndCondition = reason === 'manual_close' || reason === 'completed' || reason === 'target_reached' || reason === 'rescue_target_reached' || reason === 'auto_bank_100' || reason === 'profit_milestone' || reason === 'smart_auto_close' || reason === 'first_win_close' || reason === 'back_positive_close' || reason === 'profit_90_reset';
 
-        if (isEndCondition && cycleProfit > 0) {
+        const isTwin = config.role === 'twin' || closingPlan.role === 'twin';
+
+        if (isEndCondition && cycleProfit > 0 && !isTwin) {
             // A. Normal Cycle Accumulation
             if (config.accumulationPercent > 0) {
                 amountToBank = roundTwo(cycleProfit * (config.accumulationPercent / 100));
@@ -268,16 +270,6 @@ export const useMasaniello = (
             // remaining after internal banking (which is the portion that will stay in the next cycle)
             const shareableProfit = roundTwo(cycleProfit - amountToBank);
             const feedAmount = roundTwo(shareableProfit * (feedPercentage / 100));
-
-            console.log('🔍 FEED CALCULATION DEBUG:', {
-                cycleProfit,
-                amountToBank,
-                shareableProfit,
-                feedPercentage,
-                feedAmount,
-                currentCapital: closingPlan.currentCapital,
-                startCapital: closingPlan.startCapital
-            });
 
             if (feedAmount > 0) {
                 if (onFeedTriggered) onFeedTriggered(feedAmount);
@@ -483,6 +475,7 @@ export const useMasaniello = (
 
 
     const checkPlanStatus = (planState: MasaPlan) => {
+        planState.updatedAt = new Date().toISOString();
         const startCap = roundTwo(planState.startCapital);
 
         // Update wasNegative flag if capital drops below start capital
@@ -644,16 +637,16 @@ export const useMasaniello = (
             ? Math.min(stake, currentPlan.feedSource.virtualBuffer)
             : stake;
 
-        return Math.ceil(finalStake);
+        return roundTwo(finalStake);
     };
 
     const handlePartialWin = (activeQuota: number, pair?: string, checklistResults?: Record<string, boolean>, note?: string) => {
         if (!currentPlan) return;
         const fullStake = getNextStake(activeQuota);
         const halfStake = roundTwo(fullStake / 2);
-        const commission = roundTwo((halfStake * (config.tradingCommission || 0)) / 100);
-        const profit = roundTwo(halfStake * (activeQuota - 1) - commission);
-        const newCapital = roundTwo(currentPlan.currentCapital + profit);
+        const commissionRaw = (halfStake * (config.tradingCommission || 0)) / 100;
+        const profitRaw = halfStake * (activeQuota - 1) - commissionRaw;
+        const newCapital = roundTwo(currentPlan.currentCapital + profitRaw);
 
         const partialWinsCount = currentPlan.events.filter(e => e.isPartialSequence && e.isWin && !e.isVoid).length;
         const isSecondWin = (partialWinsCount + 1) % 2 === 0;
@@ -695,7 +688,7 @@ export const useMasaniello = (
 
         // SLAVE BUFFER LOGIC
         if (currentPlan.role === 'slave' && currentPlan.feedSource) {
-            const newBuffer = roundTwo(currentPlan.feedSource.virtualBuffer + profit);
+            const newBuffer = roundTwo(currentPlan.feedSource.virtualBuffer + profitRaw);
             updatedPlan.feedSource = {
                 ...currentPlan.feedSource,
                 virtualBuffer: newBuffer,
@@ -711,9 +704,9 @@ export const useMasaniello = (
         if (!currentPlan) return;
         const fullStake = getNextStake(activeQuota);
         const halfStake = roundTwo(fullStake / 2);
-        const commission = roundTwo((halfStake * (config.tradingCommission || 0)) / 100);
-        const lossAmount = roundTwo(halfStake + commission);
-        const newCapital = roundTwo(currentPlan.currentCapital - lossAmount);
+        const commissionRaw = (halfStake * (config.tradingCommission || 0)) / 100;
+        const lossAmountRaw = halfStake + commissionRaw;
+        const newCapital = roundTwo(currentPlan.currentCapital - lossAmountRaw);
 
         const partialLossesCount = currentPlan.events.filter(e => e.isPartialSequence && !e.isWin && !e.isVoid).length;
         const isSecondLoss = (partialLossesCount + 1) % 2 === 0;
@@ -754,7 +747,7 @@ export const useMasaniello = (
 
         // SLAVE BUFFER LOGIC
         if (currentPlan.role === 'slave' && currentPlan.feedSource) {
-            const newBuffer = roundTwo(currentPlan.feedSource.virtualBuffer - lossAmount);
+            const newBuffer = roundTwo(currentPlan.feedSource.virtualBuffer - lossAmountRaw);
             updatedPlan.feedSource = {
                 ...currentPlan.feedSource,
                 virtualBuffer: newBuffer,
@@ -777,11 +770,11 @@ export const useMasaniello = (
         const hQuota = config.hedgeQuota || 3.0;
         const actualStake = isHedge ? roundTwo(regularStake / (hQuota - 1)) : regularStake;
 
-        const commission = roundTwo((actualStake * (config.tradingCommission || 0)) / 100);
-        const netResult = isWin ? roundTwo(actualStake * (activeQuota - 1) - commission + surplus) : roundTwo(-actualStake - commission);
-        const newCapital = roundTwo(currentPlan.currentCapital + netResult);
+        const commissionRaw = (actualStake * (config.tradingCommission || 0)) / 100;
+        const netResultRaw = isWin ? (actualStake * (activeQuota - 1) - commissionRaw + surplus) : (-actualStake - commissionRaw);
 
-        console.log(`[useMasaniello] handleFullBet: Hedge=${isHedge}, SkipSeq=${skipSequence}, Win=${isWin}, Stake=${actualStake}, Quota=${activeQuota} => Net=${netResult}, NewCapital=${newCapital}`);
+        const netResult = roundTwo(netResultRaw);
+        const newCapital = roundTwo(currentPlan.currentCapital + netResult);
 
         // Sequence progression logic: Skip if isHedge OR if skipSequence is requested
         const progressionDisabled = isHedge || skipSequence;
@@ -827,8 +820,104 @@ export const useMasaniello = (
 
         // SLAVE BUFFER LOGIC
         if (currentPlan.role === 'slave' && currentPlan.feedSource) {
-            const result = isWin ? roundTwo(actualStake * (activeQuota - 1) - commission) : roundTwo(-actualStake - commission);
+            const result = isWin ? roundTwo(actualStake * (activeQuota - 1) - commissionRaw) : roundTwo(-actualStake - commissionRaw);
             const newBuffer = roundTwo(currentPlan.feedSource.virtualBuffer + result);
+            updatedPlan.feedSource = {
+                ...currentPlan.feedSource,
+                virtualBuffer: Math.max(0, newBuffer),
+                isPaused: newBuffer <= 0
+            };
+            if (onBufferUpdate) onBufferUpdate(Math.max(0, newBuffer));
+        }
+
+        checkPlanStatus(updatedPlan);
+    };
+
+    const handleHedgedBet = (hWin: boolean, mWin: boolean, mainQuota?: number, hQuota?: number, pair?: string, checklistResults?: Record<string, boolean>, note?: string) => {
+        if (!currentPlan) return;
+        const mQuota = mainQuota || currentPlan.quota;
+        const hedgeQuota = hQuota || config.hedgeQuota || 3.0;
+
+        const mainStake = getNextStake(mQuota);
+        const hedgeStake = roundTwo(mainStake / (hedgeQuota - 1));
+
+        const mComm = (mainStake * (config.tradingCommission || 0)) / 100;
+        const hComm = (hedgeStake * (config.tradingCommission || 0)) / 100;
+
+        const hNetRaw = hWin ? (hedgeStake * (hedgeQuota - 1) - hComm) : (-hedgeStake - hComm);
+        const mNetRaw = mWin ? (mainStake * (mQuota - 1) - mComm) : (-mainStake - mComm);
+
+        const hNet = roundTwo(hNetRaw);
+        const totalNet = roundTwo(hNetRaw + mNetRaw);
+        const newCapital = roundTwo(currentPlan.currentCapital + totalNet);
+
+        // Sequence progression logic: Skip if hWin is true and mWin is false (Pure Hedge Success)
+        // This prevents the Masaniello from losing an event when the coverage worked.
+        const skipSeq = hWin === true && mWin === false;
+
+        const nextEventsLeft = skipSeq ? currentPlan.remainingEvents : currentPlan.remainingEvents - 1;
+        const nextWinsLeft = (mWin && !skipSeq) ? currentPlan.remainingWins - 1 : currentPlan.remainingWins;
+
+        const baseEventId = currentPlan.events.filter((e) => !e.isSystemLog).length;
+
+        const hEvent: MasaEvent = {
+            id: baseEventId + 1,
+            stake: hedgeStake,
+            isWin: hWin,
+            isVoid: false,
+            isPartialSequence: false,
+            message: 'HEDGE TRADE',
+            capitalAfter: roundTwo(currentPlan.currentCapital + hNet),
+            eventsLeft: currentPlan.remainingEvents,
+            winsLeft: currentPlan.remainingWins,
+            timestamp: new Date().toISOString(),
+            nyTimestamp: getNYTime(),
+            pair: pair || currentPlan.lastUsedPair,
+            isHedge: true,
+            quota: hedgeQuota,
+            snapshot: createSnapshot(currentPlan),
+            note
+        };
+
+        const mEvent: MasaEvent = {
+            id: baseEventId + 2,
+            stake: mainStake,
+            isWin: mWin,
+            isVoid: false,
+            isPartialSequence: false,
+            message: 'MAIN TRADE (HEDGED)',
+            capitalAfter: newCapital,
+            eventsLeft: nextEventsLeft,
+            winsLeft: nextWinsLeft,
+            timestamp: new Date().toISOString(),
+            nyTimestamp: getNYTime(),
+            pair: pair || currentPlan.lastUsedPair,
+            isHedge: false,
+            checklistResults,
+            quota: mQuota,
+            snapshot: createSnapshot(currentPlan),
+            note
+        };
+
+        const updatedPlan: MasaPlan = {
+            ...currentPlan,
+            currentCapital: newCapital,
+            events: [...currentPlan.events, hEvent, mEvent],
+            remainingEvents: nextEventsLeft,
+            remainingWins: nextWinsLeft,
+            wins: (mWin && !skipSeq) ? currentPlan.wins + 1 : currentPlan.wins,
+            losses: (!mWin && !skipSeq) ? currentPlan.losses + 1 : currentPlan.losses,
+            currentConsecutiveLosses: mWin ? 0 : (skipSeq ? currentPlan.currentConsecutiveLosses : (currentPlan.currentConsecutiveLosses || 0) + 1),
+            lastUsedPair: pair || currentPlan.lastUsedPair,
+            maxNetProfit: currentPlan.maxNetProfit
+        };
+
+        // SLAVE BUFFER LOGIC
+        if (currentPlan.role === 'slave' && currentPlan.feedSource) {
+            const resultH = hWin ? roundTwo(hedgeStake * (hedgeQuota - 1) - hComm) : roundTwo(-hedgeStake - hComm);
+            const resultM = mWin ? roundTwo(mainStake * (mQuota - 1) - mComm) : roundTwo(-mainStake - mComm);
+            const totalResult = roundTwo(resultH + resultM);
+            const newBuffer = roundTwo(currentPlan.feedSource.virtualBuffer + totalResult);
             updatedPlan.feedSource = {
                 ...currentPlan.feedSource,
                 virtualBuffer: Math.max(0, newBuffer),
@@ -864,35 +953,7 @@ export const useMasaniello = (
         });
     };
 
-    const handleAdjustment = (amount: number, isWinEquivalent: boolean) => {
-        if (!currentPlan) return;
-        const adjCapital = roundTwo(currentPlan.currentCapital + amount);
-        const adjEvent: MasaEvent = {
-            id: currentPlan.events.filter((e) => !e.isSystemLog).length + 1,
-            stake: Math.abs(amount),
-            isWin: isWinEquivalent,
-            isVoid: false,
-            isPartialSequence: false,
-            capitalAfter: adjCapital,
-            eventsLeft: currentPlan.remainingEvents - 1,
-            winsLeft: isWinEquivalent ? Math.max(0, currentPlan.remainingWins - 1) : currentPlan.remainingWins,
-            timestamp: new Date().toISOString(),
-            quota: currentPlan.quota,
-            message: amount >= 0 ? `USCITA PARZIALE (+€${amount})` : `PERDITA PARZIALE (-€${Math.abs(amount)})`,
-            snapshot: createSnapshot(currentPlan)
-        };
 
-        setCurrentPlan({
-            ...currentPlan,
-            currentCapital: adjCapital,
-            remainingEvents: currentPlan.remainingEvents - 1,
-            remainingWins: isWinEquivalent ? Math.max(0, currentPlan.remainingWins - 1) : currentPlan.remainingWins,
-            wins: isWinEquivalent ? currentPlan.wins + 1 : currentPlan.wins,
-            losses: isWinEquivalent ? currentPlan.losses : currentPlan.losses + 1,
-            events: [...currentPlan.events, adjEvent],
-            currentConsecutiveLosses: isWinEquivalent ? 0 : (currentPlan.currentConsecutiveLosses || 0) + 1
-        });
-    };
 
     const lockProfit = (amount: number): MasaPlan | null => {
         if (!currentPlan || amount <= 0 || amount > currentPlan.currentCapital) return null;
@@ -1035,88 +1096,7 @@ export const useMasaniello = (
         setCurrentPlan(null);
     };
 
-    const updatePlanStartCapital = (newStartCapital: number) => {
-        if (!currentPlan) return;
 
-        // Recalculate metrics based on new start capital
-        const maxNetProfit = calculateMaxNetProfit(
-            newStartCapital,
-            currentPlan.totalEvents,
-            currentPlan.expectedWins,
-            currentPlan.quota,
-            currentPlan.maxConsecutiveLosses || 0
-        );
-
-        const newTargetCapital = newStartCapital + maxNetProfit;
-        const eventsPlayed = currentPlan.events.filter(e => !e.isSystemLog).length;
-
-        const updatedPlan: MasaPlan = {
-            ...currentPlan,
-            startCapital: newStartCapital,
-            maxNetProfit: maxNetProfit,
-            targetCapital: newTargetCapital,
-            // If no events played, update current capital too
-            currentCapital: eventsPlayed === 0 ? newStartCapital : currentPlan.currentCapital
-        };
-
-        setCurrentPlan(updatedPlan);
-    };
-
-    const updateAbsoluteStartCapital = (newAmount: number) => {
-        // 1. Determine the old start capital (baseline)
-        let oldStart = config.initialCapital;
-        if (history.length > 0) oldStart = history[0].startCapital;
-        else if (currentPlan) oldStart = currentPlan.startCapital;
-
-        if (oldStart <= 0 || newAmount <= 0) return;
-
-        const scaleFactor = newAmount / oldStart;
-
-        // 2. Update Config
-        setConfig(prev => ({ ...prev, initialCapital: newAmount }));
-
-        // 3. Helper to scale a plan
-        const scalePlan = (plan: MasaPlan): MasaPlan => {
-            const scaledEvents = plan.events.map(e => {
-                // Cast to any to access potential dynamic properties if they exist in runtime but not type
-                // or just stick to typed properties to be safe.
-                // Snapshot in MasaEvent is optional.
-                let newSnapshot = e.snapshot;
-                if (newSnapshot && (newSnapshot as any).currentCapital) {
-                    newSnapshot = { ...newSnapshot, currentCapital: roundTwo((newSnapshot as any).currentCapital * scaleFactor) } as any;
-                }
-
-                return {
-                    ...e,
-                    stake: roundTwo(e.stake * scaleFactor),
-                    capitalAfter: roundTwo(e.capitalAfter * scaleFactor),
-                    snapshot: newSnapshot
-                };
-            });
-
-            return {
-                ...plan,
-                startCapital: roundTwo(plan.startCapital * scaleFactor),
-                currentCapital: roundTwo(plan.currentCapital * scaleFactor),
-                targetCapital: roundTwo(plan.targetCapital * scaleFactor),
-                maxNetProfit: roundTwo(plan.maxNetProfit * scaleFactor),
-                accumulatedAmount: plan.accumulatedAmount ? roundTwo(plan.accumulatedAmount * scaleFactor) : 0,
-                events: scaledEvents
-            };
-        };
-
-        // 4. Update History
-        if (history.length > 0) {
-            const newHistory = history.map(scalePlan);
-            setHistory(newHistory);
-        }
-
-        // 5. Update Current Plan
-        if (currentPlan) {
-            const scaledCurrent = scalePlan(currentPlan);
-            setCurrentPlan(scaledCurrent);
-        }
-    };
 
     return {
         plans,
@@ -1135,10 +1115,10 @@ export const useMasaniello = (
         toggleAllRules,
         startNewPlan,
         handleFullBet,
+        handleHedgedBet,
         handlePartialWin,
         handlePartialLoss,
         handleBreakEven,
-        handleAdjustment,
         activateRescueMode,
         activateElasticHorizon,
         resetAll,
@@ -1147,8 +1127,6 @@ export const useMasaniello = (
         lockProfit,
         getRescueSuggestion: (extraCap?: number) => getRescueSuggestion(currentPlan, extraCap),
         savePlan,
-        updatePlanStartCapital,
-        updateAbsoluteStartCapital,
         updateConfig: (newConfig: Partial<Config>) => setConfig(prev => ({ ...prev, ...newConfig }))
     };
 };

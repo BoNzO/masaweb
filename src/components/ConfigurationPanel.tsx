@@ -113,20 +113,32 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
         )
     );
 
-    const previewProfit = config.role === 'twin' && isAsymmetricTwin
+    const profitLong = config.role === 'twin'
         ? calculateMaxNetProfit(
-            config.twinConfig?.capitalLong || 0,
+            config.twinConfig?.capitalLong || (effectiveCapital / 2),
             config.twinConfig?.totalEventsLong || config.totalEvents,
             config.twinConfig?.expectedWinsLong || config.expectedWins,
-            (config.twinConfig?.quotaLong || config.quota) / (1 + commissionRate),
+            (config.twinConfig?.quotaLong || config.quota) / (1 + (commissionRate || 0)),
             config.maxConsecutiveLosses || 0
-        ) + calculateMaxNetProfit(
-            config.twinConfig?.capitalShort || 0,
+        ) : 0;
+
+    const profitShort = config.role === 'twin'
+        ? calculateMaxNetProfit(
+            config.twinConfig?.capitalShort || (effectiveCapital / 2),
             config.twinConfig?.totalEventsShort || config.totalEvents,
             config.twinConfig?.expectedWinsShort || config.expectedWins,
-            (config.twinConfig?.quotaShort || config.quota) / (1 + commissionRate),
+            (config.twinConfig?.quotaShort || config.quota) / (1 + (commissionRate || 0)),
             config.maxConsecutiveLosses || 0
-        )
+        ) : 0;
+
+    const roiLong = config.role === 'twin' && (config.twinConfig?.capitalLong || (effectiveCapital / 2)) > 0
+        ? (profitLong / (config.twinConfig?.capitalLong || (effectiveCapital / 2))) * 100 : 0;
+
+    const roiShort = config.role === 'twin' && (config.twinConfig?.capitalShort || (effectiveCapital / 2)) > 0
+        ? (profitShort / (config.twinConfig?.capitalShort || (effectiveCapital / 2))) * 100 : 0;
+
+    const previewProfit = config.role === 'twin'
+        ? profitLong + profitShort
         : calculateMaxNetProfit(
             effectiveCapital,
             config.totalEvents,
@@ -134,6 +146,7 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
             effectiveQuotaInPanel,
             config.maxConsecutiveLosses || 0
         );
+
     const previewTarget = effectiveCapital + previewProfit;
     const previewROI = effectiveCapital > 0 ? (previewProfit / effectiveCapital) * 100 : 0;
 
@@ -237,6 +250,12 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                             <div className="font-['DM_Mono'] font-bold text-2xl lg:text-3xl tracking-tighter text-[#00d4aa]">
                                 +€{isNaN(previewProfit) ? '---' : Math.ceil(previewProfit).toLocaleString('it-IT')}
                             </div>
+                            {config.role === 'twin' && (
+                                <div className="flex justify-center gap-3 mt-1.5 border-t border-white/5 pt-1.5">
+                                    <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">L: +€{Math.ceil(profitLong).toLocaleString('it-IT')}</span>
+                                    <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">S: +€{Math.ceil(profitShort).toLocaleString('it-IT')}</span>
+                                </div>
+                            )}
                             <div className="text-[11px] text-[#5a6272] mt-1">su singolo ciclo</div>
                         </div>
                         {missionTarget && (
@@ -258,6 +277,12 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                                 {isNaN(previewROI) ? '---' : Math.ceil(previewROI)}%
                                 <span className="text-xs opacity-60 font-medium tracking-normal">(quota {((previewROI / 100) + 1).toFixed(2)})</span>
                             </div>
+                            {config.role === 'twin' && (
+                                <div className="flex justify-center gap-3 mt-1.5 border-t border-white/5 pt-1.5">
+                                    <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">L: {Math.ceil(roiLong)}%</span>
+                                    <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">S: {Math.ceil(roiShort)}%</span>
+                                </div>
+                            )}
                             <div className="text-[11px] text-[#5a6272] mt-1">
                                 {config.role === 'twin' && isAsymmetricTwin ? (
                                     <div className="flex flex-col items-center gap-0.5">
@@ -1069,7 +1094,7 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
             {/* CUSTOM FONT INJECTION */}
             < style dangerouslySetInnerHTML={{
                 __html: `
-                @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap');
+                @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap');
                 
                 input[type=range]::-webkit-slider-thumb {
                     -webkit-appearance: none;

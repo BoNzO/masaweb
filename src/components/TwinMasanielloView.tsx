@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import type { MasanielloInstance } from '../types/masaniello';
 import { useMasaniello } from '../hooks/useMasaniello';
-import { calculateStake } from '../utils/masaLogic';
-import { TrendingUp, Check, X, Shuffle, ArrowRightLeft, CircleDot, Shield, Lock, PieChart, TrendingDown, Zap, AlertCircle, AreaChart as ChartIcon, Save } from 'lucide-react';
+import { calculateStake, calculateTwinHealth } from '../utils/masaLogic';
+import { TrendingUp, Check, X, Shuffle, ArrowRightLeft, CircleDot, Shield, Lock, PieChart, TrendingDown, Zap, AlertCircle, AreaChart as ChartIcon, Save, Link } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, CartesianGrid, XAxis, YAxis, Tooltip, Area } from 'recharts';
 import HistoryLog from './HistoryLog';
 
@@ -45,13 +45,23 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
         if (!twinState || isInternalUpdating.current) return;
 
         // Sync Long
-        masaLong.setConfig(instance.config);
+        masaLong.setConfig({
+            ...instance.config,
+            quota: instance.config.twinConfig?.quotaLong || instance.config.quota,
+            totalEvents: instance.config.twinConfig?.totalEventsLong || instance.config.totalEvents,
+            expectedWins: instance.config.twinConfig?.expectedWinsLong || instance.config.expectedWins,
+        });
         masaLong.setPlans({ [twinState.planLong.id]: twinState.planLong });
         masaLong.setActivePlanId(String(twinState.planLong.id));
         masaLong.setHistory(twinState.historyLong || []);
 
         // Sync Short
-        masaShort.setConfig(instance.config);
+        masaShort.setConfig({
+            ...instance.config,
+            quota: instance.config.twinConfig?.quotaShort || instance.config.quota,
+            totalEvents: instance.config.twinConfig?.totalEventsShort || instance.config.totalEvents,
+            expectedWins: instance.config.twinConfig?.expectedWinsShort || instance.config.expectedWins,
+        });
         masaShort.setPlans({ [twinState.planShort.id]: twinState.planShort });
         masaShort.setActivePlanId(String(twinState.planShort.id));
         masaShort.setHistory(twinState.historyShort || []);
@@ -76,14 +86,22 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
         const historyLong = masaLong.history;
         const historyShort = masaShort.history;
 
-        const hasPlanChange = currentLong && currentShort &&
-            (JSON.stringify(currentLong) !== JSON.stringify(twinState.planLong) ||
-                JSON.stringify(currentShort) !== JSON.stringify(twinState.planShort));
+        const lChanged = currentLong?.updatedAt !== twinState.planLong?.updatedAt ||
+            currentLong?.events.length !== twinState.planLong?.events.length ||
+            currentLong?.currentCapital !== twinState.planLong?.currentCapital;
+
+        const sChanged = currentShort?.updatedAt !== twinState.planShort?.updatedAt ||
+            currentShort?.events.length !== twinState.planShort?.events.length ||
+            currentShort?.currentCapital !== twinState.planShort?.currentCapital;
+
+        const hasOutwardChange = lChanged || sChanged ||
+            (masaLong.history.length !== (twinState.historyLong?.length || 0)) ||
+            (masaShort.history.length !== (twinState.historyShort?.length || 0));
 
         const hasHistoryChange = historyLong.length !== (twinState.historyLong?.length || 0) ||
             historyShort.length !== (twinState.historyShort?.length || 0);
 
-        if (hasPlanChange || hasHistoryChange) {
+        if (hasOutwardChange || hasHistoryChange) {
             isInternalUpdating.current = true;
 
             // Only push to global history when there's a genuinely NEW completion
@@ -138,6 +156,17 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
     const winsShort = currentShort.expectedWins - currentShort.remainingWins;
     const lossesShort = (currentShort.totalEvents - currentShort.remainingEvents) - winsShort;
     const eventsPlayedShort = currentShort.totalEvents - currentShort.remainingEvents;
+
+    // PERFORMANCE: Memoize history display to avoid expensive .filter().reverse() on every render
+    const displayHistoryLong = useMemo(() => {
+        return [...currentLong.events].filter(e => !e.isSystemLog).reverse();
+    }, [currentLong.events]);
+
+    const displayHistoryShort = useMemo(() => {
+        return [...currentShort.events].filter(e => !e.isSystemLog).reverse();
+    }, [currentShort.events]);
+
+    const twinHealth = useMemo(() => calculateTwinHealth(currentLong, currentShort), [currentLong, currentShort]);
 
     const elastic = instance.config.elasticConfig;
     const isElasticLongTriggered = !!(elastic?.enabled &&
@@ -245,24 +274,14 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
             const mOutcome = longSession.main;
             const q = quotaLong;
 
-            console.log('[TwinMasa] Auto-resolving LONG session:', { hOutcome, mOutcome });
-
-            // 1. Immediately clear session to stop effect loop
             setLongSession(null);
             setHedgePending(null);
-            isInternalUpdating.current = true;
 
-            // 2. Hedge Result (does not progress sequence)
-            masaLong.handleFullBet(hOutcome, q, 'HEDGE TRADE', {}, 0, true);
-
-            // 3. Main Result (progresses sequence)
-            setTimeout(() => {
-                const skipSeq = hOutcome === true && mOutcome === false;
-                masaLong.handleFullBet(mOutcome, q, 'MAIN TRADE (HEDGED)', {}, 0, false, skipSeq);
-                isInternalUpdating.current = false;
-            }, 50);
+            // 2. Use the atomic handler
+            masaLong.handleHedgedBet(hOutcome, mOutcome, q, undefined, 'HEDGE SESSION', undefined, noteLong);
+            setNoteLong('');
         }
-    }, [longSession, quotaLong, masaLong]);
+    }, [longSession, quotaLong, masaLong, noteLong]);
 
     useEffect(() => {
         if (shortSession && shortSession.main !== null && shortSession.hedge !== null) {
@@ -270,20 +289,13 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
             const mOutcome = shortSession.main;
             const q = quotaShort;
 
-            console.log('[TwinMasa] Auto-resolving SHORT session:', { hOutcome, mOutcome });
-
             setShortSession(null);
             setHedgePending(null);
-            isInternalUpdating.current = true;
 
-            masaShort.handleFullBet(hOutcome, q, 'HEDGE TRADE', {}, 0, true);
-            setTimeout(() => {
-                const skipSeq = hOutcome === true && mOutcome === false;
-                masaShort.handleFullBet(mOutcome, q, 'MAIN TRADE (HEDGED)', {}, 0, false, skipSeq);
-                isInternalUpdating.current = false;
-            }, 50);
+            masaShort.handleHedgedBet(hOutcome, mOutcome, q, undefined, 'HEDGE SESSION', undefined, noteShort);
+            setNoteShort('');
         }
-    }, [shortSession, quotaShort, masaShort]);
+    }, [shortSession, quotaShort, masaShort, noteShort]);
 
     const handleLockProfit = (side: 'LONG' | 'SHORT') => {
         setLockInput({ side, value: '' });
@@ -367,12 +379,20 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
         }, 50);
     };
 
-    const totalInitial = currentLong.startCapital + currentShort.startCapital;
-    const totalCurrent = currentLong.currentCapital + currentShort.currentCapital;
-    const netProfit = totalCurrent - totalInitial;
+    const originLongCap = twinState?.historyLong && twinState.historyLong.length > 0
+        ? twinState.historyLong[0].startCapital
+        : (instance.config?.twinConfig?.capitalLong || (instance.absoluteStartCapital / 2));
 
-    const profitLong = currentLong.currentCapital - currentLong.startCapital;
-    const profitShort = currentShort.currentCapital - currentShort.startCapital;
+    const originShortCap = twinState?.historyShort && twinState.historyShort.length > 0
+        ? twinState.historyShort[0].startCapital
+        : (instance.config?.twinConfig?.capitalShort || (instance.absoluteStartCapital / 2));
+
+    const profitLong = currentLong.currentCapital - originLongCap;
+    const profitShort = currentShort.currentCapital - originShortCap;
+    const netProfit = profitLong + profitShort;
+
+    const totalInitial = originLongCap + originShortCap;
+    const totalCurrent = totalInitial + netProfit;
 
     const getIntegratedChartData = () => {
         if (!twinState) return [];
@@ -381,20 +401,21 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
         const longEvents = currentLong.events.filter(e => !e.isSystemLog).map(e => ({ ...e, side: 'LONG' }));
         const shortEvents = currentShort.events.filter(e => !e.isSystemLog).map(e => ({ ...e, side: 'SHORT' }));
 
-        // 2. Past Completed Plans (if any, in instance.history)
-        let pastEvents: any[] = [];
-        (instance.history || []).forEach(plan => {
-            // Distinguish side by quota or other heuristics
-            const side = plan.quota === (twinState.planLong.quota) ? 'LONG' : 'SHORT';
-            pastEvents = [...pastEvents, ...plan.events.filter(e => !e.isSystemLog).map(e => ({ ...e, side }))];
-        });
+        // 2. Past Completed Plans
+        const pastLongEvents = (twinState.historyLong || []).map(p => p.events.filter(e => !e.isSystemLog).map(e => ({ ...e, side: 'LONG' }))).flat();
+        const pastShortEvents = (twinState.historyShort || []).map(p => p.events.filter(e => !e.isSystemLog).map(e => ({ ...e, side: 'SHORT' }))).flat();
 
-        const allEventsSorted = [...pastEvents, ...longEvents, ...shortEvents].sort((a, b) =>
+        const combinedPastEvents = [...pastLongEvents, ...pastShortEvents].sort((a, b) =>
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
 
-        let curLongCap = currentLong.startCapital;
-        let curShortCap = currentShort.startCapital;
+        const allEventsSorted = [...combinedPastEvents, ...longEvents, ...shortEvents].sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+
+        let curLongCap = originLongCap;
+        let curShortCap = originShortCap;
+
         let cumulativeLocked = 0;
 
         const data: any[] = [{
@@ -493,720 +514,860 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                         </div>
                     </div>
 
-                    {/* Closed Masaniellos Counter + Save - Top Right */}
-                    <div className="hidden md:flex items-center gap-3">
-                        {onSaveLog && twinState && (
-                            <button
-                                onClick={() => {
-                                    onSaveLog(twinState.planLong);
-                                    alert('Sessione Twin salvata nel Diario!');
-                                }}
-                                className="group flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[9px] font-black uppercase rounded-lg border border-indigo-500/20 transition-all active:scale-95"
-                            >
-                                <Save size={12} className="group-hover:scale-110 transition-transform" />
-                                Salva Diario
-                            </button>
-                        )}
-                        <div className="flex flex-col items-end">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Masa Chiusi</div>
-                            <div className="bg-black/30 border border-white/10 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-inner">
-                                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse mt-0.5"></div>
-                                <span className="text-sm font-black text-cyan-50">{instance.history.length}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Total Capital - Center */}
-                    <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex-col items-center mt-2">
-                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Bilancio Globale (L+S)</div>
-                        <div className="flex items-end gap-3">
-                            <div className="text-3xl font-black text-white">
-                                €{Math.ceil(totalCurrent).toLocaleString('it-IT')}
-                            </div>
-                            <div className={`text-sm font-bold mb-1 ${netProfit > 0 ? 'text-emerald-400' : netProfit < 0 ? 'text-rose-400' : 'text-slate-500'}`}>
-                                {netProfit > 0 ? '+' : ''}€{Math.ceil(netProfit).toLocaleString('it-IT')}
-                            </div>
+                    {onSaveLog && twinState && (
+                        <button
+                            onClick={() => {
+                                // Create a consolidated summary plan for the journal
+                                const consolidatedPlan = {
+                                    ...twinState.planLong,
+                                    id: `twin_log_${Date.now()}`,
+                                    name: `${instance.name} (Integrated Session)`,
+                                    startCapital: totalInitial,
+                                    currentCapital: totalCurrent,
+                                    events: [...(twinState.historyLong || []).flatMap(p => p.events), ...currentLong.events],
+                                    status: 'active'
+                                };
+                                onSaveLog(consolidatedPlan);
+                                alert('Sessione Twin salvata nel Diario!');
+                            }}
+                            className="group flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[9px] font-black uppercase rounded-lg border border-indigo-500/20 transition-all active:scale-95"
+                        >
+                            <Save size={12} className="group-hover:scale-110 transition-transform" />
+                            Salva Diario
+                        </button>
+                    )}
+                    <div className="flex flex-col items-end">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Masa Chiusi</div>
+                        <div className="bg-black/30 border border-white/10 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-inner">
+                            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse mt-0.5"></div>
+                            <span className="text-sm font-black text-cyan-50">{instance.history.length}</span>
                         </div>
                     </div>
                 </div>
 
-                {/* Notification Area */}
-                <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-8 pointer-events-none">
-                    {lockNotification && (
-                        <div className={`p-4 rounded-2xl border backdrop-blur-md shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto ${lockNotification.type === 'success'
-                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                {/* Total Capital - Center */}
+                <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex-col items-center mt-2">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
+                        Bilancio Globale (L+S)
+                        <div title="Masa Health Index (Twin Aggregato)" className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black tracking-tighter transition-all ${twinHealth.score > 70 ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 animate-pulse' :
+                            twinHealth.score > 40 ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' :
+                                'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                             }`}>
-                            <div className={`p-2 rounded-lg ${lockNotification.type === 'success' ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
-                                {lockNotification.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}
+                            <Shield size={8} /> MHI: {twinHealth.score}%
+                        </div>
+                    </div>
+                    <div className="flex items-end gap-3">
+                        <div className="text-3xl font-black text-white">
+                            €{Math.ceil(totalCurrent).toLocaleString('it-IT')}
+                        </div>
+                        <div className={`text-sm font-bold mb-1 ${netProfit > 0 ? 'text-emerald-400' : netProfit < 0 ? 'text-rose-400' : 'text-slate-500'}`}>
+                            {netProfit > 0 ? '+' : ''}€{Math.ceil(netProfit).toLocaleString('it-IT')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Notification Area */}
+            <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-lg px-8 pointer-events-none">
+                {lockNotification && (
+                    <div className={`p-4 rounded-2xl border backdrop-blur-md shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto ${lockNotification.type === 'success'
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                        : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                        }`}>
+                        <div className={`p-2 rounded-lg ${lockNotification.type === 'success' ? 'bg-emerald-500/20' : 'bg-rose-500/20'}`}>
+                            {lockNotification.type === 'success' ? <Check size={18} /> : <AlertCircle size={18} />}
+                        </div>
+                        <div className="text-xs font-black uppercase tracking-widest flex-1">
+                            {lockNotification.message}
+                        </div>
+                        <button onClick={() => setLockNotification(null)} className="text-slate-400 hover:text-white transition-colors">
+                            <X size={16} />
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Smart Recovery Suggestion Banner */}
+            {recoveryPending && (
+                <div className="mx-8 mt-2 mb-6 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
+                            <Zap size={18} />
+                        </div>
+                        <div>
+                            <div className="text-xs font-black text-white uppercase tracking-widest">Suggerimento Smart Recovery</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
+                                {recoveryPending.from === 'LONG'
+                                    ? `Usa €${recoveryPending.amount} del profitto LONG per aiutare SHORT (in Red Line)`
+                                    : `Usa €${recoveryPending.amount} del profitto SHORT per aiutare LONG (in Red Line)`}
                             </div>
-                            <div className="text-xs font-black uppercase tracking-widest flex-1">
-                                {lockNotification.message}
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setRecoveryPending(null)}
+                            className="px-4 py-2 hover:bg-white/5 text-slate-400 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors"
+                        >
+                            Ignora
+                        </button>
+                        <button
+                            onClick={handleApproveRecovery}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-500/10"
+                        >
+                            Approva
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Elastic Horizon Banners */}
+            {isElasticLongTriggered && (
+                <div className="mx-8 mt-2 mb-6 p-4 bg-indigo-900/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
+                            <Shield size={18} />
+                        </div>
+                        <div>
+                            <div className="text-xs font-black text-white uppercase tracking-widest">Elastic Horizon: Masa Long</div>
+                            <div className="text-[10px] text-indigo-200/70 font-bold uppercase mt-0.5">
+                                Rilevato Drawdown. Estendi l'orizzonte (Stretch {(currentLong.elasticStretchesUsed || 0) + 1}/{elastic?.maxStretches || 0}).
                             </div>
-                            <button onClick={() => setLockNotification(null)} className="text-slate-400 hover:text-white transition-colors">
-                                <X size={16} />
-                            </button>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => masaLong.activateElasticHorizon()}
+                        className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-500/20"
+                    >
+                        Attiva Estensione
+                    </button>
+                </div>
+            )}
+
+            {isElasticShortTriggered && (
+                <div className="mx-8 mt-2 mb-6 p-4 bg-indigo-900/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
+                            <Shield size={18} />
+                        </div>
+                        <div>
+                            <div className="text-xs font-black text-white uppercase tracking-widest">Elastic Horizon: Masa Short</div>
+                            <div className="text-[10px] text-indigo-200/70 font-bold uppercase mt-0.5">
+                                Rilevato Drawdown. Estendi l'orizzonte (Stretch {(currentShort.elasticStretchesUsed || 0) + 1}/{elastic?.maxStretches || 0}).
+                            </div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => masaShort.activateElasticHorizon()}
+                        className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-500/20"
+                    >
+                        Attiva Estensione
+                    </button>
+                </div>
+            )}
+
+            {/* Centralized Configuration */}
+            <div className="flex flex-wrap items-center justify-center gap-4 bg-black/20 rounded-2xl p-4 border border-white/5 mb-2 mx-auto w-full md:w-fit relative z-10 -mt-6">
+                <div className="flex gap-2 items-center">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Quota:</span>
+                    <span className="text-sm font-bold text-white">
+                        {quotaLong === quotaShort ? (
+                            `@${quotaLong.toFixed(2)}`
+                        ) : (
+                            <span className="flex gap-2">
+                                <span className="text-blue-400">@{quotaLong.toFixed(2)}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-purple-400">@{quotaShort.toFixed(2)}</span>
+                            </span>
+                        )}
+                    </span>
+                </div>
+                <div className="w-px h-4 bg-white/10 hidden md:block"></div>
+                <div className="flex gap-2 items-center">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Eventi:</span>
+                    <span className="text-sm font-bold text-white">
+                        {currentLong.totalEvents === currentShort.totalEvents ? (
+                            currentLong.totalEvents
+                        ) : (
+                            <span className="flex gap-2">
+                                <span className="text-blue-400">{currentLong.totalEvents}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-purple-400">{currentShort.totalEvents}</span>
+                            </span>
+                        )}
+                    </span>
+                </div>
+                <div className="w-px h-4 bg-white/10 hidden md:block"></div>
+                <div className="flex gap-2 items-center">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Attese:</span>
+                    <span className="text-sm font-bold text-white">
+                        {currentLong.expectedWins === currentShort.expectedWins ? (
+                            currentLong.expectedWins
+                        ) : (
+                            <span className="flex gap-2">
+                                <span className="text-blue-400">{currentLong.expectedWins}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-purple-400">{currentShort.expectedWins}</span>
+                            </span>
+                        )}
+                    </span>
+                </div>
+                <div className="w-px h-4 bg-white/10 hidden md:block"></div>
+                <div className="flex gap-2 items-center">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Red Line:</span>
+                    <span className="text-sm font-bold text-white">
+                        {mLong === mShort ? (
+                            mLong > 0 ? mLong : 'N/A'
+                        ) : (
+                            <span className="flex gap-2">
+                                <span className="text-blue-400">{mLong}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-purple-400">{mShort}</span>
+                            </span>
+                        )}
+                    </span>
+                </div>
+            </div>
+
+            {/* Summary Cards: aggregated + per-twin breakdown */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 mb-2">
+                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Capitale di partenza</div>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className="text-2xl font-black text-white">€{Math.ceil(totalInitial).toLocaleString('it-IT')}</div>
+                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-[11px] text-blue-400 font-bold">L: €{Math.ceil(originLongCap).toLocaleString('it-IT')}</div>
+                            <div className="text-[11px] text-purple-400 font-bold">S: €{Math.ceil(originShortCap).toLocaleString('it-IT')}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Capitale Target</div>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className="text-2xl font-black text-white">€{Math.ceil(currentLong.targetCapital + currentShort.targetCapital).toLocaleString('it-IT')}</div>
+                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-[11px] text-blue-400 font-bold">L: €{Math.ceil(currentLong.targetCapital).toLocaleString('it-IT')}</div>
+                            <div className="text-[11px] text-purple-400 font-bold">S: €{Math.ceil(currentShort.targetCapital).toLocaleString('it-IT')}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Utile Netto</div>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className={`text-2xl font-black ${netProfit > 0 ? 'text-emerald-400' : netProfit < 0 ? 'text-rose-400' : 'text-white'}`}> {netProfit > 0 ? '+' : ''}€{Math.ceil(netProfit).toLocaleString('it-IT')}</div>
+                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                        </div>
+                        <div className="text-right">
+                            <div className={`text-[11px] ${profitLong > 0 ? 'text-emerald-400' : profitLong < 0 ? 'text-rose-400' : 'text-slate-400'} font-bold`}>L: {profitLong > 0 ? '+' : ''}€{Math.ceil(profitLong).toLocaleString('it-IT')}</div>
+                            <div className={`text-[11px] ${profitShort > 0 ? 'text-emerald-400' : profitShort < 0 ? 'text-rose-400' : 'text-slate-400'} font-bold`}>S: {profitShort > 0 ? '+' : ''}€{Math.ceil(profitShort).toLocaleString('it-IT')}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Utile Percentuale</div>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            {totalInitial > 0 ? (
+                                <div className="text-2xl font-black text-amber-400">{((netProfit / totalInitial) * 100).toFixed(0)}%</div>
+                            ) : (
+                                <div className="text-2xl font-black text-slate-400">N/A</div>
+                            )}
+                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-[11px] text-blue-400 font-bold">L: {originLongCap > 0 ? Math.round(((profitLong / originLongCap) * 100)) + '%' : 'N/A'}</div>
+                            <div className="text-[11px] text-purple-400 font-bold">S: {originShortCap > 0 ? Math.round(((profitShort / originShortCap) * 100)) + '%' : 'N/A'}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* MASA LONG */}
+                <div className={`flex flex-col p-6 rounded-2xl border ${currentLong.status === 'active' ? 'bg-gradient-to-br from-blue-900/10 to-blue-900/5 border-blue-500/20' : 'bg-black/20 border-white/5'}`}>
+                    <div className="flex justify-between items-center mb-6">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-blue-400">
+                                <TrendingUp size={16} />
+                                <span className="text-[11px] font-black uppercase tracking-[0.2em]">Masa Long</span>
+                            </div>
+
+                            <div className="flex items-center gap-2 px-2 py-0.5 bg-black/40 rounded border border-white/5">
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[6px] text-slate-600 font-black uppercase tracking-widest">Quota</span>
+                                    <span className="text-[8px] font-black text-slate-300">@{quotaLong.toFixed(2)}</span>
+                                </div>
+                                <div className="w-px h-2 bg-white/5"></div>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[6px] text-slate-600 font-black uppercase tracking-widest">Eventi</span>
+                                    <span className="text-[8px] font-black text-slate-300">{currentLong.totalEvents}</span>
+                                </div>
+                                <div className="w-px h-2 bg-white/5"></div>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[6px] text-slate-600 font-black uppercase tracking-widest">Attese</span>
+                                    <span className="text-[8px] font-black text-slate-300">{currentLong.expectedWins}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Status:</span>
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/5 border border-emerald-500/10">
+                                <span className="text-[8px] font-black text-emerald-400/80 uppercase tracking-widest">Active</span>
+                                <div className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.4)]"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="text-center mb-6">
+                        <div className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-1">Suggested Stake</div>
+                        <div className="text-4xl font-['DM_Sans'] font-black text-white flex items-center justify-center gap-2">
+                            <span className="text-2xl text-slate-500">€</span>{Math.ceil(stakeLong).toLocaleString('it-IT')}
+                        </div>
+                    </div>
+
+                    <div className="flex gap-4 mb-6">
+                        <button
+                            onClick={() => handleOutcomeLong(true)}
+                            disabled={currentLong.status !== 'active'}
+                            className={`flex-1 py-3.5 rounded-2xl flex items-center justify-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all ${longSession?.main === true
+                                ? 'bg-emerald-500 text-white shadow-[0_0_25px_rgba(16,185,129,0.4)]'
+                                : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                                }`}
+                        >
+                            <Check size={16} /> Win
+                        </button>
+                        <button
+                            onClick={() => masaLong.handleBreakEven()}
+                            disabled={currentLong.status !== 'active' || !!longSession}
+                            className="flex-1 py-3.5 bg-slate-800/50 border border-white/5 hover:bg-slate-700/50 text-slate-300 text-[11px] font-black uppercase tracking-[0.2em] rounded-2xl transition-all flex items-center justify-center gap-2"
+                        >
+                            <CircleDot size={16} /> B.E.
+                        </button>
+                        <button
+                            onClick={() => handleOutcomeLong(false)}
+                            disabled={currentLong.status !== 'active'}
+                            className={`flex-1 py-3.5 rounded-2xl flex items-center justify-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all ${longSession?.main === false
+                                ? 'bg-rose-500 text-white shadow-[0_0_25px_rgba(244,63,94,0.4)]'
+                                : 'bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20'
+                                }`}
+                        >
+                            <X size={16} /> Loss
+                        </button>
+                    </div>
+
+                    {/* Note Input Long */}
+                    <div className="mb-3 px-1">
+                        <textarea
+                            value={noteLong}
+                            onChange={(e) => setNoteLong(e.target.value)}
+                            placeholder="Nota diario per Masa Long..."
+                            className="w-full min-h-[42px] bg-black/30 border border-white/5 rounded-xl px-3 py-2 text-[10px] text-slate-300 placeholder:text-slate-600 outline-none focus:border-blue-500/30 transition-all resize-none shadow-inner"
+                        />
+                    </div>
+
+                    {/* Hedge & Lock Controls Long */}
+                    <div className="flex flex-col gap-2 mb-6">
+                        {hedgePending === 'LONG' ? (
+                            <div className="flex flex-col gap-4 p-5 bg-blue-500/5 border border-blue-500/20 rounded-[22px] animate-in fade-in zoom-in duration-200">
+                                <div className="flex flex-col items-center">
+                                    <div className="text-[10px] text-blue-400 font-black uppercase tracking-widest text-center">Hedge Configuration</div>
+                                    <div className="text-[10px] text-white font-bold mt-2 bg-blue-500/20 px-4 py-1.5 rounded-full border border-blue-500/30">
+                                        STAKE HEDGE: €{instance.config.hedgeQuota && instance.config.hedgeQuota > 1
+                                            ? Math.ceil(stakeLong / (instance.config.hedgeQuota - 1))
+                                            : Math.ceil(stakeLong * (instance.config.hedgeMultiplier || 0.2))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-3 text-center">1. Esito Copertura (Short)</div>
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => handleHedgeOutcome(true)}
+                                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-xl transition-all ${longSession?.hedge === true ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
+                                            >
+                                                Vinto
+                                            </button>
+                                            <button
+                                                onClick={() => handleHedgeOutcome(false)}
+                                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-xl transition-all ${longSession?.hedge === false ? 'bg-rose-500 text-white shadow-[0_0_15px_rgba(244,63,94,0.3)]' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}
+                                            >
+                                                Perso
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-3 border-t border-white/5 text-center">
+                                        <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">2. Esito Trade Principale</div>
+                                        <div className="text-[8px] text-blue-400/70 italic">(Usa i tasti sopra)</div>
+                                    </div>
+
+                                    <button
+                                        onClick={() => cancelHedgeMode('LONG')}
+                                        className="w-full py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all border border-white/5"
+                                    >
+                                        Annulla Hedge
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex justify-between items-center px-4">
+                                <button
+                                    onClick={() => handleHedge('LONG')}
+                                    className="flex items-center gap-2 text-[10px] font-black text-blue-400/80 hover:text-blue-400 uppercase tracking-widest transition-colors"
+                                >
+                                    <Link size={14} className="opacity-70" /> Hedge Short
+                                </button>
+
+                                {lockInput?.side === 'LONG' ? (
+                                    <div className="flex gap-2 animate-in slide-in-from-right-2">
+                                        <input
+                                            type="number"
+                                            value={lockInput.value}
+                                            onChange={(e) => setLockInput({ ...lockInput, value: e.target.value === '' ? '' : Number(e.target.value) })}
+                                            placeholder="€"
+                                            className="w-20 bg-black/40 border border-amber-500/30 rounded-lg px-2 py-1 text-[10px] font-bold text-amber-400 outline-none"
+                                        />
+                                        <button onClick={handleLockSubmit} className="text-amber-500 hover:text-amber-400"><Check size={16} /></button>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => handleLockProfit('LONG')}
+                                        className="flex items-center gap-2 text-[10px] font-black text-amber-500/80 hover:text-amber-500 uppercase tracking-widest transition-colors"
+                                    >
+                                        <Lock size={14} className="opacity-70" /> Lock Profit
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+
+
+                    <div className="bg-[#141d2e] border border-white/5 rounded-[22px] p-5 shadow-2xl relative overflow-hidden">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-6">Active Stats</div>
+
+                        <div className="flex items-center justify-between mb-8 px-2">
+                            <div className="flex flex-col items-center">
+                                <div className="text-[8px] text-slate-500 font-black uppercase tracking-widest mb-1">Capitale Attuale</div>
+                                <div className="text-2xl font-black text-white">€{Math.ceil(currentLong.currentCapital).toLocaleString('it-IT')}</div>
+                                <div className="flex gap-1.5 mt-2">
+                                    <div className="text-[7px] text-slate-500 bg-black/40 px-1.5 py-0.5 rounded border border-white/5">INS: €4700</div>
+                                    <div className="text-[7px] text-slate-500 bg-black/40 px-1.5 py-0.5 rounded border border-white/5">CO</div>
+                                </div>
+                            </div>
+
+                            <div className="relative w-24 h-24">
+                                <svg className="w-full h-full transform -rotate-90">
+                                    <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-white/5" />
+                                    <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="4" fill="transparent"
+                                        strokeDasharray={2 * Math.PI * 40}
+                                        strokeDashoffset={2 * Math.PI * 40 * (1 - Math.max(0, Math.min(1, (currentLong.currentCapital - currentLong.startCapital) / (currentLong.targetCapital - currentLong.startCapital))))}
+                                        className="text-blue-500" strokeLinecap="round" />
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <span className="text-[9px] font-black text-white tracking-widest leading-none">Reached %</span>
+                                    <span className="text-[11px] font-black text-blue-400 mt-0.5">{Math.max(0, Math.round(((currentLong.currentCapital - currentLong.startCapital) / (currentLong.targetCapital - currentLong.startCapital)) * 100))}%</span>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col items-center">
+                                <div className="text-[8px] text-slate-500 font-black uppercase tracking-widest mb-1">Capitale Target</div>
+                                <div className="text-2xl font-black text-blue-400">€{Math.ceil(currentLong.targetCapital).toLocaleString('it-IT')}</div>
+                                <div className="text-[8px] text-slate-400 font-black uppercase tracking-widest mt-2 px-3 py-1 bg-blue-500/10 rounded-full border border-blue-500/20">
+                                    Raggiunto: {Math.max(0, Math.round(((currentLong.currentCapital - currentLong.startCapital) / (currentLong.targetCapital - currentLong.startCapital)) * 100))}%
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                    <ChartIcon size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Vittorie</span>
+                                    <div className="text-xs font-black text-white">{winsLong} <span className="text-slate-600">/ {currentLong.expectedWins}</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
+                                    <X size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Perdite</span>
+                                    <div className="text-xs font-black text-white">{lossesLong} <span className="text-slate-600">/ {currentLong.totalEvents - currentLong.expectedWins}</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
+                                    <TrendingUp size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Red Line</span>
+                                    <div className="text-xs font-black text-white">{currentLong.currentConsecutiveLosses} <span className="text-slate-600">/ {mLong || '-'}</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-slate-500/10 rounded-lg text-slate-400">
+                                    <PieChart size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Eventi Giocati</span>
+                                    <div className="text-xs font-black text-white">{eventsPlayedLong} <span className="text-slate-600">/ {currentLong.totalEvents}</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+
+
+                    {/* Transfer TO Short */}
+                    <div className="mt-4 border-t border-white/5 pt-4">
+                        <button
+                            onClick={() => setTransferModal('LONG_TO_SHORT')}
+                            className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            <ArrowRightLeft size={12} /> Trasferisci a Short
+                        </button>
+                    </div>
+
+                    {/* Long History */}
+                    {displayHistoryLong.length > 0 && (
+                        <div className="mt-6 border-t border-white/5 pt-4">
+                            <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Storico Trade Long</h4>
+                            <div className="max-h-56 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                                {displayHistoryLong.map((ev: any) => (
+                                    <div key={ev.id} className="flex flex-col p-2 rounded-lg bg-black/20 border border-white/5 transition-all hover:bg-black/30">
+                                        <div className="flex justify-between items-center w-full">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`font-black text-[10px] w-5 h-5 rounded flex items-center justify-center ${ev.isVoid ? 'bg-slate-700 text-slate-400' : ev.isWin ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                                                    {ev.isWin ? 'W' : (ev.isVoid ? 'V' : 'L')}
+                                                </span>
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs text-slate-400 font-medium whitespace-nowrap">
+                                                        Stake: €{Math.ceil(ev.stake).toLocaleString('it-IT')}
+                                                    </span>
+                                                    {(ev.isHedge || ev.note === 'edge') && (
+                                                        <span className="text-[7px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1 rounded border border-blue-500/20 w-fit">
+                                                            EDGE TRADE
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-xs font-bold text-white">€{Math.ceil(ev.capitalAfter).toLocaleString('it-IT')}</div>
+                                            </div>
+                                        </div>
+                                        {ev.note && ev.note !== 'edge' && (
+                                            <div className="w-full mt-2 pt-2 border-t border-white/5 text-[9px] text-slate-500 italic">
+                                                {ev.note}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
 
-                {/* Smart Recovery Suggestion Banner */}
-                {recoveryPending && (
-                    <div className="mx-8 mt-2 mb-6 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
-                                <Zap size={18} />
+                {/* MASA SHORT */}
+                <div className={`flex flex-col p-6 rounded-2xl border ${currentShort.status === 'active' ? 'bg-gradient-to-br from-purple-900/10 to-purple-900/5 border-purple-500/20' : 'bg-black/20 border-white/5'}`}>
+                    <div className="flex justify-between items-center mb-6">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-purple-400">
+                                <TrendingDown size={16} />
+                                <span className="text-[11px] font-black uppercase tracking-[0.2em]">Masa Short</span>
                             </div>
-                            <div>
-                                <div className="text-xs font-black text-white uppercase tracking-widest">Suggerimento Smart Recovery</div>
-                                <div className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
-                                    {recoveryPending.from === 'LONG'
-                                        ? `Usa €${recoveryPending.amount} del profitto LONG per aiutare SHORT (in Red Line)`
-                                        : `Usa €${recoveryPending.amount} del profitto SHORT per aiutare LONG (in Red Line)`}
+
+                            <div className="flex items-center gap-2 px-2 py-0.5 bg-black/40 rounded border border-white/5">
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[6px] text-slate-600 font-black uppercase tracking-widest">Quota</span>
+                                    <span className="text-[8px] font-black text-purple-300">@{quotaShort.toFixed(2)}</span>
+                                </div>
+                                <div className="w-px h-2 bg-white/5"></div>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[6px] text-slate-600 font-black uppercase tracking-widest">Eventi</span>
+                                    <span className="text-[8px] font-black text-purple-300">{currentShort.totalEvents}</span>
+                                </div>
+                                <div className="w-px h-2 bg-white/5"></div>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[6px] text-slate-600 font-black uppercase tracking-widest">Attese</span>
+                                    <span className="text-[8px] font-black text-purple-300">{currentShort.expectedWins}</span>
                                 </div>
                             </div>
                         </div>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => setRecoveryPending(null)}
-                                className="px-4 py-2 hover:bg-white/5 text-slate-400 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors"
-                            >
-                                Ignora
-                            </button>
-                            <button
-                                onClick={handleApproveRecovery}
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-500/10"
-                            >
-                                Approva
-                            </button>
+
+                        <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Status:</span>
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/5 border border-emerald-500/10">
+                                <span className="text-[8px] font-black text-emerald-400/80 uppercase tracking-widest">Active</span>
+                                <div className="w-1 h-1 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.4)]"></div>
+                            </div>
                         </div>
                     </div>
-                )}
 
-                {/* Elastic Horizon Banners */}
-                {isElasticLongTriggered && (
-                    <div className="mx-8 mt-2 mb-6 p-4 bg-indigo-900/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
-                                <Shield size={18} />
-                            </div>
-                            <div>
-                                <div className="text-xs font-black text-white uppercase tracking-widest">Elastic Horizon: Masa Long</div>
-                                <div className="text-[10px] text-indigo-200/70 font-bold uppercase mt-0.5">
-                                    Rilevato Drawdown. Estendi l'orizzonte (Stretch {(currentLong.elasticStretchesUsed || 0) + 1}/{elastic?.maxStretches || 0}).
-                                </div>
-                            </div>
+                    <div className="text-center mb-6">
+                        <div className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mb-1">Suggested Stake</div>
+                        <div className="text-4xl font-['DM_Sans'] font-black text-white flex items-center justify-center gap-2">
+                            <span className="text-2xl text-slate-500">€</span>{Math.ceil(stakeShort).toLocaleString('it-IT')}
                         </div>
+                    </div>
+
+                    <div className="flex gap-4 mb-6">
                         <button
-                            onClick={() => masaLong.activateElasticHorizon()}
-                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-500/20"
+                            onClick={() => handleOutcomeShort(true)}
+                            disabled={currentShort.status !== 'active'}
+                            className={`flex-1 py-3.5 rounded-2xl flex items-center justify-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all ${shortSession?.main === true
+                                ? 'bg-emerald-500 text-white shadow-[0_0_25px_rgba(16,185,129,0.4)]'
+                                : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                                }`}
                         >
-                            Attiva Estensione
+                            <Check size={16} /> Win
+                        </button>
+                        <button
+                            onClick={() => masaShort.handleBreakEven()}
+                            disabled={currentShort.status !== 'active' || !!shortSession}
+                            className="flex-1 py-3.5 bg-slate-800/50 border border-white/5 hover:bg-slate-700/50 text-slate-300 text-[11px] font-black uppercase tracking-[0.2em] rounded-2xl transition-all flex items-center justify-center gap-2"
+                        >
+                            <CircleDot size={16} /> B.E.
+                        </button>
+                        <button
+                            onClick={() => handleOutcomeShort(false)}
+                            disabled={currentShort.status !== 'active'}
+                            className={`flex-1 py-3.5 rounded-2xl flex items-center justify-center gap-2 text-[11px] font-black uppercase tracking-[0.2em] transition-all ${shortSession?.main === false
+                                ? 'bg-rose-500 text-white shadow-[0_0_25px_rgba(244,63,94,0.4)]'
+                                : 'bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20'
+                                }`}
+                        >
+                            <X size={16} /> Loss
                         </button>
                     </div>
-                )}
 
-                {isElasticShortTriggered && (
-                    <div className="mx-8 mt-2 mb-6 p-4 bg-indigo-900/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-300">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-lg">
-                                <Shield size={18} />
-                            </div>
-                            <div>
-                                <div className="text-xs font-black text-white uppercase tracking-widest">Elastic Horizon: Masa Short</div>
-                                <div className="text-[10px] text-indigo-200/70 font-bold uppercase mt-0.5">
-                                    Rilevato Drawdown. Estendi l'orizzonte (Stretch {(currentShort.elasticStretchesUsed || 0) + 1}/{elastic?.maxStretches || 0}).
-                                </div>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => masaShort.activateElasticHorizon()}
-                            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-500/20"
-                        >
-                            Attiva Estensione
-                        </button>
+                    {/* Note Input Short */}
+                    <div className="mb-3 px-1">
+                        <textarea
+                            value={noteShort}
+                            onChange={(e) => setNoteShort(e.target.value)}
+                            placeholder="Nota diario per Masa Short..."
+                            className="w-full min-h-[42px] bg-black/30 border border-white/5 rounded-xl px-3 py-2 text-[10px] text-slate-300 placeholder:text-slate-600 outline-none focus:border-purple-500/30 transition-all resize-none shadow-inner"
+                        />
                     </div>
-                )}
 
-                {/* Centralized Configuration */}
-                <div className="flex flex-wrap items-center justify-center gap-4 bg-black/20 rounded-2xl p-4 border border-white/5 mb-2 mx-auto w-full md:w-fit relative z-10 -mt-6">
-                    <div className="flex gap-2 items-center">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Quota:</span>
-                        <span className="text-sm font-bold text-white">
-                            {quotaLong === quotaShort ? (
-                                `@${quotaLong.toFixed(2)}`
-                            ) : (
-                                <span className="flex gap-2">
-                                    <span className="text-blue-400">@{quotaLong.toFixed(2)}</span>
-                                    <span className="text-slate-600">|</span>
-                                    <span className="text-purple-400">@{quotaShort.toFixed(2)}</span>
-                                </span>
-                            )}
-                        </span>
-                    </div>
-                    <div className="w-px h-4 bg-white/10 hidden md:block"></div>
-                    <div className="flex gap-2 items-center">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Eventi:</span>
-                        <span className="text-sm font-bold text-white">
-                            {currentLong.totalEvents === currentShort.totalEvents ? (
-                                currentLong.totalEvents
-                            ) : (
-                                <span className="flex gap-2">
-                                    <span className="text-blue-400">{currentLong.totalEvents}</span>
-                                    <span className="text-slate-600">|</span>
-                                    <span className="text-purple-400">{currentShort.totalEvents}</span>
-                                </span>
-                            )}
-                        </span>
-                    </div>
-                    <div className="w-px h-4 bg-white/10 hidden md:block"></div>
-                    <div className="flex gap-2 items-center">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Attese:</span>
-                        <span className="text-sm font-bold text-white">
-                            {currentLong.expectedWins === currentShort.expectedWins ? (
-                                currentLong.expectedWins
-                            ) : (
-                                <span className="flex gap-2">
-                                    <span className="text-blue-400">{currentLong.expectedWins}</span>
-                                    <span className="text-slate-600">|</span>
-                                    <span className="text-purple-400">{currentShort.expectedWins}</span>
-                                </span>
-                            )}
-                        </span>
-                    </div>
-                    <div className="w-px h-4 bg-white/10 hidden md:block"></div>
-                    <div className="flex gap-2 items-center">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest whitespace-nowrap">Red Line:</span>
-                        <span className="text-sm font-bold text-white">
-                            {mLong === mShort ? (
-                                mLong > 0 ? mLong : 'N/A'
-                            ) : (
-                                <span className="flex gap-2">
-                                    <span className="text-blue-400">{mLong}</span>
-                                    <span className="text-slate-600">|</span>
-                                    <span className="text-purple-400">{mShort}</span>
-                                </span>
-                            )}
-                        </span>
-                    </div>
-                </div>
+                    {/* Hedge & Lock Controls Short */}
+                    <div className="flex flex-col gap-2 mb-6">
+                        {hedgePending === 'SHORT' ? (
+                            <div className="flex flex-col gap-4 p-5 bg-purple-500/5 border border-purple-500/20 rounded-[22px] animate-in fade-in zoom-in duration-200">
+                                <div className="flex flex-col items-center">
+                                    <div className="text-[10px] text-purple-400 font-black uppercase tracking-widest text-center">Hedge Configuration</div>
+                                    <div className="text-[10px] text-white font-bold mt-2 bg-purple-500/20 px-4 py-1.5 rounded-full border border-purple-500/30">
+                                        STAKE HEDGE: €{instance.config.hedgeQuota && instance.config.hedgeQuota > 1
+                                            ? Math.ceil(stakeShort / (instance.config.hedgeQuota - 1))
+                                            : Math.ceil(stakeShort * (instance.config.hedgeMultiplier || 0.2))}
+                                    </div>
+                                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* MASA LONG */}
-                    <div className={`flex flex-col p-6 rounded-2xl border ${currentLong.status === 'active' ? 'bg-gradient-to-br from-blue-900/10 to-blue-900/5 border-blue-500/20' : 'bg-black/20 border-white/5'}`}>
-                        <div className="flex flex-col gap-1 mb-6">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-blue-400">
-                                    <TrendingUp size={20} />
-                                    <span className="text-xs font-black uppercase tracking-widest">Masa Long</span>
-                                </div>
-                                <div className="px-3 py-1 rounded-full bg-black/20 text-[10px] font-bold text-slate-300 uppercase tracking-widest">
-                                    Status: {currentLong.status.toUpperCase()}
-                                </div>
-                            </div>
-                            {/* Local Config Badge */}
-                            <div className="flex gap-3 mt-2 bg-blue-500/5 p-2 rounded-xl border border-blue-500/10">
-                                <div className="flex flex-col">
-                                    <span className="text-[7px] text-blue-400/50 font-black uppercase">Quota</span>
-                                    <span className="text-[10px] font-black text-white">@{quotaLong.toFixed(2)}</span>
-                                </div>
-                                <div className="w-px h-6 bg-blue-500/10"></div>
-                                <div className="flex flex-col">
-                                    <span className="text-[7px] text-blue-400/50 font-black uppercase">Eventi</span>
-                                    <span className="text-[10px] font-black text-white">{currentLong.totalEvents}</span>
-                                </div>
-                                <div className="w-px h-6 bg-blue-500/10"></div>
-                                <div className="flex flex-col">
-                                    <span className="text-[7px] text-blue-400/50 font-black uppercase">Attese</span>
-                                    <span className="text-[10px] font-black text-white">{currentLong.expectedWins}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-3 mb-8">
-                            <button
-                                onClick={() => handleOutcomeLong(true)}
-                                disabled={currentLong.status !== 'active'}
-                                className={`flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 ${longSession?.main === true
-                                    ? 'bg-emerald-400 ring-4 ring-emerald-500/30 scale-105'
-                                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
-                                    }`}
-                            >
-                                <Check size={16} /> WIN
-                            </button>
-                            <button
-                                onClick={() => masaLong.handleBreakEven()}
-                                disabled={currentLong.status !== 'active' || !!longSession}
-                                className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-colors shadow-lg shadow-slate-900/20 flex items-center justify-center gap-2"
-                                title="Break Even"
-                            >
-                                <CircleDot size={16} /> B.E.
-                            </button>
-                            <button
-                                onClick={() => handleOutcomeLong(false)}
-                                disabled={currentLong.status !== 'active'}
-                                className={`flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 ${longSession?.main === false
-                                    ? 'bg-rose-400 ring-4 ring-rose-500/30 scale-105'
-                                    : 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
-                                    }`}
-                            >
-                                <X size={16} /> LOSS
-                            </button>
-                        </div>
-
-                        {/* Note Input Long */}
-                        <div className="mb-3 px-1">
-                            <textarea
-                                value={noteLong}
-                                onChange={(e) => setNoteLong(e.target.value)}
-                                placeholder="Nota diario per Masa Long..."
-                                className="w-full min-h-[42px] bg-black/30 border border-white/5 rounded-xl px-3 py-2 text-[10px] text-slate-300 placeholder:text-slate-600 outline-none focus:border-blue-500/30 transition-all resize-none shadow-inner"
-                            />
-                        </div>
-
-                        {/* Hedge & Lock Controls Long */}
-                        <div className="flex flex-col gap-2 mb-6">
-                            {hedgePending === 'LONG' ? (
-                                <div className="flex flex-col gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl animate-in fade-in zoom-in duration-200">
-                                    <div className="flex flex-col items-center">
-                                        <div className="text-[10px] text-blue-400 font-black uppercase tracking-widest text-center">Configurazione Hedge Trade</div>
-                                        <div className="text-[9px] text-slate-500 font-bold mb-1 italic">Entrambi gli esiti necessari per procedere</div>
-                                        <div className="text-[10px] text-white font-bold mt-1 bg-blue-500/20 px-3 py-1 rounded-full border border-blue-500/30">
-                                            STAKE HEDGE: €{instance.config.hedgeQuota && instance.config.hedgeQuota > 1
-                                                ? Math.ceil(stakeLong / (instance.config.hedgeQuota - 1))
-                                                : Math.ceil(stakeLong * (instance.config.hedgeMultiplier || 0.2))}
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-3 text-center">1. Esito Copertura (Long)</div>
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => handleHedgeOutcome(true)}
+                                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-xl transition-all ${shortSession?.hedge === true ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
+                                            >
+                                                Vinto
+                                            </button>
+                                            <button
+                                                onClick={() => handleHedgeOutcome(false)}
+                                                className={`flex-1 py-2 text-[10px] font-black uppercase rounded-xl transition-all ${shortSession?.hedge === false ? 'bg-rose-500 text-white shadow-[0_0_15px_rgba(244,63,94,0.3)]' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}
+                                            >
+                                                Perso
+                                            </button>
                                         </div>
                                     </div>
 
-                                    <div className="space-y-3">
-                                        <div>
-                                            <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-2 text-center">1. Esito Copertura (Short)</div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleHedgeOutcome(true)}
-                                                    className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all ${longSession?.hedge === true ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400'}`}
-                                                >
-                                                    Vinto
-                                                </button>
-                                                <button
-                                                    onClick={() => handleHedgeOutcome(false)}
-                                                    className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all ${longSession?.hedge === false ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30' : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-400'}`}
-                                                >
-                                                    Perso
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <div className="pt-2 border-t border-white/5">
-                                            <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 text-center">2. Seleziona Esito Trade Principale</div>
-                                            <div className="text-[8px] text-blue-400/70 italic text-center mb-2">(Usa i tasti WIN/LOSS sopra)</div>
-                                        </div>
-
-                                        <button
-                                            onClick={() => cancelHedgeMode('LONG')}
-                                            className="w-full py-1.5 bg-slate-500/10 hover:bg-slate-500/20 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all border border-white/5"
-                                        >
-                                            Annulla Hedge Mode
-                                        </button>
+                                    <div className="pt-3 border-t border-white/5 text-center">
+                                        <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">2. Esito Trade Principale</div>
+                                        <div className="text-[8px] text-purple-400/70 italic">(Usa i tasti sopra)</div>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="flex gap-2">
+
                                     <button
-                                        onClick={() => handleHedge('LONG')}
-                                        className="flex-1 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[10px] font-bold uppercase tracking-widest rounded-lg border border-blue-500/20 transition-all flex items-center justify-center gap-2"
-                                        title="Usa il 20% dello stake per una copertura SHORT per proteggere il capitale Long"
+                                        onClick={() => cancelHedgeMode('SHORT')}
+                                        className="w-full py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all border border-white/5"
                                     >
-                                        <Shield size={12} /> Hedge Short
+                                        Annulla Hedge
                                     </button>
-                                    {lockInput?.side === 'LONG' ? (
-                                        <div className="flex-1 flex gap-2 animate-in slide-in-from-right-2 duration-200">
-                                            <input
-                                                type="number"
-                                                value={lockInput.value}
-                                                onChange={(e) => setLockInput({ ...lockInput, value: e.target.value === '' ? '' : Number(e.target.value) })}
-                                                placeholder="Euro..."
-                                                autoFocus
-                                                className="flex-1 bg-black/40 border border-amber-500/30 rounded-lg px-2 text-[10px] font-bold text-amber-400 placeholder:text-amber-500/30 outline-none focus:border-amber-500/60 transition-all"
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleLockSubmit();
-                                                    if (e.key === 'Escape') setLockInput(null);
-                                                }}
-                                            />
-                                            <button
-                                                onClick={handleLockSubmit}
-                                                className="px-3 bg-amber-500 text-black text-[9px] font-black uppercase rounded-lg hover:bg-amber-400 transition-colors"
-                                            >
-                                                OK
-                                            </button>
-                                            <button
-                                                onClick={() => setLockInput(null)}
-                                                className="px-2 bg-slate-800 text-slate-400 text-[9px] font-black uppercase rounded-lg hover:bg-slate-700"
-                                            >
-                                                <X size={10} />
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <button
-                                            onClick={() => handleLockProfit('LONG')}
-                                            className="flex-1 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 text-[10px] font-black uppercase tracking-widest rounded-lg border border-amber-500/20 transition-all flex items-center justify-center gap-2 group"
-                                            title="Preleva e metti al sicuro una parte del capitale"
-                                        >
-                                            <Lock size={12} className="group-hover:scale-110 transition-transform" /> Lock Profit
-                                        </button>
-                                    )}
                                 </div>
-                            )}
-                        </div>
-
-                        <div className="text-center mb-8">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Stake Suggerito</div>
-                            <div className="text-5xl font-black text-white">
-                                €{Math.ceil(stakeLong).toLocaleString('it-IT')}
                             </div>
-                        </div>
+                        ) : (
+                            <div className="flex justify-between items-center px-4">
+                                <button
+                                    onClick={() => handleHedge('SHORT')}
+                                    className="flex items-center gap-2 text-[10px] font-black text-purple-400/80 hover:text-purple-400 uppercase tracking-widest transition-colors"
+                                >
+                                    <Link size={14} className="opacity-70" /> Hedge Long
+                                </button>
 
-                        <div className="grid grid-cols-2 gap-3 mb-8">
-                            <div className="bg-black/20 p-3 rounded-xl border border-white/5 text-center">
-                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Capitale Attuale</div>
-                                <div className="flex flex-col items-center">
-                                    <div className="text-xl font-bold text-white">€{Math.ceil(currentLong.currentCapital).toLocaleString('it-IT')}</div>
-                                    <div className="flex gap-1.5 mt-1 items-center">
-                                        <div className="text-[8px] bg-slate-500/10 text-slate-500 px-1.5 py-0.5 rounded border border-white/5 whitespace-nowrap">
-                                            INIZ: €{Math.ceil(currentLong.startCapital).toLocaleString('it-IT')}
-                                        </div>
-                                        <div className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${profitLong > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : profitLong < 0 ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-slate-500/10 text-slate-500 border-white/5'}`}>
-                                            {profitLong > 0 ? '+' : ''}€{Math.ceil(profitLong).toLocaleString('it-IT')}
-                                        </div>
+                                {lockInput?.side === 'SHORT' ? (
+                                    <div className="flex gap-2 animate-in slide-in-from-right-2">
+                                        <input
+                                            type="number"
+                                            value={lockInput.value}
+                                            onChange={(e) => setLockInput({ ...lockInput, value: e.target.value === '' ? '' : Number(e.target.value) })}
+                                            placeholder="€"
+                                            className="w-20 bg-black/40 border border-amber-500/30 rounded-lg px-2 py-1 text-[10px] font-bold text-amber-400 outline-none"
+                                        />
+                                        <button onClick={handleLockSubmit} className="text-amber-500 hover:text-amber-400"><Check size={16} /></button>
                                     </div>
-                                </div>
-                            </div>
-                            <div className="bg-black/20 p-3 rounded-xl border border-white/5 text-center">
-                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Capitale Target</div>
-                                <div className="flex flex-col items-center">
-                                    <div className="text-xl font-bold text-blue-400">€{Math.ceil(currentLong.targetCapital).toLocaleString('it-IT')}</div>
-                                    <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-1 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
-                                        Raggiunto: {Math.max(0, Math.min(100, Math.round(((currentLong.currentCapital - currentLong.startCapital) / (currentLong.targetCapital - currentLong.startCapital)) * 100)))}%
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-emerald-500/70 font-bold uppercase tracking-widest mb-1">Vittorie</div>
-                                <div className="text-sm font-bold text-white">{winsLong} <span className="text-slate-500 text-xs">/ {currentLong.expectedWins}</span></div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-rose-500/70 font-bold uppercase tracking-widest mb-1">Perdite</div>
-                                <div className="text-sm font-bold text-white">{lossesLong} <span className="text-slate-500 text-xs">/ {currentLong.totalEvents - currentLong.expectedWins}</span></div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-blue-500/70 font-bold uppercase tracking-widest mb-1">Red Line</div>
-                                <div className="text-sm font-bold text-white">{currentLong.currentConsecutiveLosses} <span className="text-slate-500 text-xs">/ {mLong || '-'}</span></div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Eventi Giocati</div>
-                                <div className="text-sm font-bold text-white">{eventsPlayedLong} <span className="text-slate-500 text-xs">/ {currentLong.totalEvents}</span></div>
-                            </div>
-                        </div>
-
-
-
-                        {/* Transfer TO Short */}
-                        <div className="mt-4 border-t border-white/5 pt-4">
-                            <button
-                                onClick={() => setTransferModal('LONG_TO_SHORT')}
-                                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2"
-                            >
-                                <ArrowRightLeft size={12} /> Trasferisci a Short
-                            </button>
-                        </div>
-
-                        {/* Long History */}
-                        {currentLong.events.filter(e => !e.isSystemLog).length > 0 && (
-                            <div className="mt-6 border-t border-white/5 pt-4">
-                                <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Storico Trade Long</h4>
-                                <div className="max-h-56 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
-                                    {[...currentLong.events].filter(e => !e.isSystemLog).reverse().map(ev => (
-                                        <div key={ev.id} className="flex justify-between items-center p-2 rounded-lg bg-black/20 border border-white/5">
-                                            <div className="flex items-center gap-2">
-                                                <span className={`font-black text-[10px] w-5 h-5 rounded flex items-center justify-center ${ev.isVoid ? 'bg-slate-700 text-slate-400' : ev.isWin ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
-                                                    {ev.isWin ? 'W' : (ev.isVoid ? 'V' : 'L')}
-                                                </span>
-                                                <span className="text-xs text-slate-400 font-medium whitespace-nowrap">
-                                                    Stake: €{Math.ceil(ev.stake).toLocaleString('it-IT')}
-                                                </span>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className="text-xs font-bold text-white">€{Math.ceil(ev.capitalAfter).toLocaleString('it-IT')}</div>
-                                            </div>
-                                            {ev.note && (
-                                                <div className="w-full mt-2 pt-2 border-t border-white/5 text-[9px] text-slate-500 italic">
-                                                    {ev.note}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
+                                ) : (
+                                    <button
+                                        onClick={() => handleLockProfit('SHORT')}
+                                        className="flex items-center gap-2 text-[10px] font-black text-amber-500/80 hover:text-amber-500 uppercase tracking-widest transition-colors"
+                                    >
+                                        <Lock size={14} className="opacity-70" /> Lock Profit
+                                    </button>
+                                )}
                             </div>
                         )}
                     </div>
 
-                    {/* MASA SHORT */}
-                    <div className={`flex flex-col p-6 rounded-2xl border ${currentShort.status === 'active' ? 'bg-gradient-to-br from-purple-900/10 to-purple-900/5 border-purple-500/20' : 'bg-black/20 border-white/5'}`}>
-                        <div className="flex flex-col gap-1 mb-6">
-                            <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2 text-purple-400">
-                                    <TrendingDown size={20} />
-                                    <span className="text-xs font-black uppercase tracking-widest">Masa Short</span>
-                                </div>
-                                <div className="px-3 py-1 rounded-full bg-black/20 text-[10px] font-bold text-slate-300 uppercase tracking-widest">
-                                    Status: {currentShort.status.toUpperCase()}
+
+
+                    <div className="bg-[#1a142e] border border-white/5 rounded-[22px] p-5 shadow-2xl relative overflow-hidden">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-6">Active Stats</div>
+
+                        <div className="flex items-center justify-between mb-8 px-2">
+                            <div className="flex flex-col items-center">
+                                <div className="text-[8px] text-slate-500 font-black uppercase tracking-widest mb-1">Capitale Attuale</div>
+                                <div className="text-2xl font-black text-white">€{Math.ceil(currentShort.currentCapital).toLocaleString('it-IT')}</div>
+                                <div className="flex gap-1.5 mt-2">
+                                    <div className="text-[7px] text-slate-500 bg-black/40 px-1.5 py-0.5 rounded border border-white/5">INS: €4700</div>
+                                    <div className="text-[7px] text-slate-500 bg-black/40 px-1.5 py-0.5 rounded border border-white/5">CO</div>
                                 </div>
                             </div>
-                            {/* Local Config Badge */}
-                            <div className="flex gap-3 mt-2 bg-purple-500/5 p-2 rounded-xl border border-purple-500/10">
+
+                            <div className="relative w-24 h-24">
+                                <svg className="w-full h-full transform -rotate-90">
+                                    <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-white/5" />
+                                    <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="4" fill="transparent"
+                                        strokeDasharray={2 * Math.PI * 40}
+                                        strokeDashoffset={2 * Math.PI * 40 * (1 - Math.max(0, Math.min(1, (currentShort.currentCapital - currentShort.startCapital) / (currentShort.targetCapital - currentShort.startCapital))))}
+                                        className="text-purple-500" strokeLinecap="round" />
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <span className="text-[9px] font-black text-white tracking-widest leading-none">Reached %</span>
+                                    <span className="text-[11px] font-black text-purple-400 mt-0.5">{Math.max(0, Math.round(((currentShort.currentCapital - currentShort.startCapital) / (currentShort.targetCapital - currentShort.startCapital)) * 100))}%</span>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col items-center">
+                                <div className="text-[8px] text-slate-500 font-black uppercase tracking-widest mb-1">Capitale Target</div>
+                                <div className="text-2xl font-black text-purple-400">€{Math.ceil(currentShort.targetCapital).toLocaleString('it-IT')}</div>
+                                <div className="text-[8px] text-slate-400 font-black uppercase tracking-widest mt-2 px-3 py-1 bg-purple-500/10 rounded-full border border-purple-500/20">
+                                    Raggiunto: {Math.max(0, Math.round(((currentShort.currentCapital - currentShort.startCapital) / (currentShort.targetCapital - currentShort.startCapital)) * 100))}%
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                                    <ChartIcon size={14} />
+                                </div>
                                 <div className="flex flex-col">
-                                    <span className="text-[7px] text-purple-400/50 font-black uppercase">Quota</span>
-                                    <span className="text-[10px] font-black text-white">@{quotaShort.toFixed(2)}</span>
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Vittorie</span>
+                                    <div className="text-xs font-black text-white">{winsShort} <span className="text-slate-600">/ {currentShort.expectedWins}</span></div>
                                 </div>
-                                <div className="w-px h-6 bg-purple-500/10"></div>
+                            </div>
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-rose-500/10 rounded-lg text-rose-500">
+                                    <X size={14} />
+                                </div>
                                 <div className="flex flex-col">
-                                    <span className="text-[7px] text-purple-400/50 font-black uppercase">Eventi</span>
-                                    <span className="text-[10px] font-black text-white">{currentShort.totalEvents}</span>
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Perdite</span>
+                                    <div className="text-xs font-black text-white">{lossesShort} <span className="text-slate-600">/ {currentShort.totalEvents - currentShort.expectedWins}</span></div>
                                 </div>
-                                <div className="w-px h-6 bg-purple-500/10"></div>
+                            </div>
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500">
+                                    <TrendingUp size={14} />
+                                </div>
                                 <div className="flex flex-col">
-                                    <span className="text-[7px] text-purple-400/50 font-black uppercase">Attese</span>
-                                    <span className="text-[10px] font-black text-white">{currentShort.expectedWins}</span>
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Red Line</span>
+                                    <div className="text-xs font-black text-white">{currentShort.currentConsecutiveLosses} <span className="text-slate-600">/ {mShort || '-'}</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center gap-3">
+                                <div className="p-2 bg-slate-500/10 rounded-lg text-slate-400">
+                                    <PieChart size={14} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">Eventi Giocati</span>
+                                    <div className="text-xs font-black text-white">{eventsPlayedShort} <span className="text-slate-600">/ {currentShort.totalEvents}</span></div>
                                 </div>
                             </div>
                         </div>
-
-                        <div className="flex gap-3 mb-8">
-                            <button
-                                onClick={() => handleOutcomeShort(true)}
-                                disabled={currentShort.status !== 'active'}
-                                className={`flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 ${shortSession?.main === true
-                                    ? 'bg-emerald-400 ring-4 ring-emerald-500/30 scale-105'
-                                    : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
-                                    }`}
-                            >
-                                <Check size={16} /> WIN
-                            </button>
-                            <button
-                                onClick={() => masaShort.handleBreakEven()}
-                                disabled={currentShort.status !== 'active' || !!shortSession}
-                                className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-colors shadow-lg shadow-slate-900/20 flex items-center justify-center gap-2"
-                                title="Break Even"
-                            >
-                                <CircleDot size={16} /> B.E.
-                            </button>
-                            <button
-                                onClick={() => handleOutcomeShort(false)}
-                                disabled={currentShort.status !== 'active'}
-                                className={`flex-1 py-3 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 ${shortSession?.main === false
-                                    ? 'bg-rose-400 ring-4 ring-rose-500/30 scale-105'
-                                    : 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
-                                    }`}
-                            >
-                                <X size={16} /> LOSS
-                            </button>
-                        </div>
-
-                        {/* Note Input Short */}
-                        <div className="mb-3 px-1">
-                            <textarea
-                                value={noteShort}
-                                onChange={(e) => setNoteShort(e.target.value)}
-                                placeholder="Nota diario per Masa Short..."
-                                className="w-full min-h-[42px] bg-black/30 border border-white/5 rounded-xl px-3 py-2 text-[10px] text-slate-300 placeholder:text-slate-600 outline-none focus:border-purple-500/30 transition-all resize-none shadow-inner"
-                            />
-                        </div>
-
-                        {/* Hedge & Lock Controls Short */}
-                        <div className="flex flex-col gap-2 mb-6">
-                            {hedgePending === 'SHORT' ? (
-                                <div className="flex flex-col gap-3 p-4 bg-purple-500/10 border border-purple-500/20 rounded-xl animate-in fade-in zoom-in duration-200">
-                                    <div className="flex flex-col items-center">
-                                        <div className="text-[10px] text-purple-400 font-black uppercase tracking-widest text-center">Configurazione Hedge Trade</div>
-                                        <div className="text-[9px] text-slate-500 font-bold mb-1 italic">Entrambi gli esiti necessari per procedere</div>
-                                        <div className="text-[10px] text-white font-bold mt-1 bg-red-500/20 px-3 py-1 rounded-full border border-red-500/30">
-                                            STAKE HEDGE: €{instance.config.hedgeQuota && instance.config.hedgeQuota > 1
-                                                ? Math.ceil(stakeShort / (instance.config.hedgeQuota - 1))
-                                                : Math.ceil(stakeShort * (instance.config.hedgeMultiplier || 0.2))}
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-3">
-                                        <div>
-                                            <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-2 text-center">1. Esito Copertura (Long)</div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleHedgeOutcome(true)}
-                                                    className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all ${shortSession?.hedge === true ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400'}`}
-                                                >
-                                                    Vinto
-                                                </button>
-                                                <button
-                                                    onClick={() => handleHedgeOutcome(false)}
-                                                    className={`flex-1 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all ${shortSession?.hedge === false ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30' : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-400'}`}
-                                                >
-                                                    Perso
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <div className="pt-2 border-t border-white/5">
-                                            <div className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 text-center">2. Seleziona Esito Trade Principale</div>
-                                            <div className="text-[8px] text-purple-400/70 italic text-center mb-2">(Usa i tasti WIN/LOSS sopra)</div>
-                                        </div>
-
-                                        <button
-                                            onClick={() => cancelHedgeMode('SHORT')}
-                                            className="w-full py-1.5 bg-slate-500/10 hover:bg-slate-500/20 text-slate-400 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all border border-white/5"
-                                        >
-                                            Annulla Hedge Mode
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => handleHedge('SHORT')}
-                                        className="flex-1 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-[10px] font-bold uppercase tracking-widest rounded-lg border border-purple-500/20 transition-all flex items-center justify-center gap-2"
-                                        title="Usa il 20% dello stake per una copertura LONG per proteggere il capitale Short"
-                                    >
-                                        <Shield size={12} /> Hedge Long
-                                    </button>
-                                    {lockInput?.side === 'SHORT' ? (
-                                        <div className="flex-1 flex gap-2 animate-in slide-in-from-right-2 duration-200">
-                                            <input
-                                                type="number"
-                                                value={lockInput.value}
-                                                onChange={(e) => setLockInput({ ...lockInput, value: e.target.value === '' ? '' : Number(e.target.value) })}
-                                                placeholder="Euro..."
-                                                autoFocus
-                                                className="flex-1 bg-black/40 border border-amber-500/30 rounded-lg px-2 text-[10px] font-bold text-amber-400 placeholder:text-amber-500/30 outline-none focus:border-amber-500/60 transition-all"
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') handleLockSubmit();
-                                                    if (e.key === 'Escape') setLockInput(null);
-                                                }}
-                                            />
-                                            <button
-                                                onClick={handleLockSubmit}
-                                                className="px-3 bg-amber-500 text-black text-[9px] font-black uppercase rounded-lg hover:bg-amber-400 transition-colors"
-                                            >
-                                                OK
-                                            </button>
-                                            <button
-                                                onClick={() => setLockInput(null)}
-                                                className="px-2 bg-slate-800 text-slate-400 text-[9px] font-black uppercase rounded-lg hover:bg-slate-700"
-                                            >
-                                                <X size={10} />
-                                            </button>
-                                        </div>
-                                    ) : (
-                                        <button
-                                            onClick={() => handleLockProfit('SHORT')}
-                                            className="flex-1 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 text-[10px] font-black uppercase tracking-widest rounded-lg border border-amber-500/20 transition-all flex items-center justify-center gap-2 group"
-                                            title="Preleva e metti al sicuro una parte del capitale"
-                                        >
-                                            <Lock size={12} className="group-hover:scale-110 transition-transform" /> Lock Profit
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="text-center mb-8">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Stake Suggerito</div>
-                            <div className="text-5xl font-black text-white">
-                                €{Math.ceil(stakeShort).toLocaleString('it-IT')}
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 mb-8">
-                            <div className="bg-black/20 p-3 rounded-xl border border-white/5 text-center">
-                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Capitale Attuale</div>
-                                <div className="flex flex-col items-center">
-                                    <div className="text-xl font-bold text-white">€{Math.ceil(currentShort.currentCapital).toLocaleString('it-IT')}</div>
-                                    <div className="flex gap-1.5 mt-1 items-center">
-                                        <div className="text-[8px] bg-slate-500/10 text-slate-500 px-1.5 py-0.5 rounded border border-white/5 whitespace-nowrap">
-                                            INIZ: €{Math.ceil(currentShort.startCapital).toLocaleString('it-IT')}
-                                        </div>
-                                        <div className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${profitShort > 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : profitShort < 0 ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-slate-500/10 text-slate-500 border-white/5'}`}>
-                                            {profitShort > 0 ? '+' : ''}€{Math.ceil(profitShort).toLocaleString('it-IT')}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="bg-black/20 p-3 rounded-xl border border-white/5 text-center">
-                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1">Capitale Target</div>
-                                <div className="flex flex-col items-center">
-                                    <div className="text-xl font-bold text-purple-400">€{Math.ceil(currentShort.targetCapital).toLocaleString('it-IT')}</div>
-                                    <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest mt-1 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
-                                        Raggiunto: {Math.max(0, Math.min(100, Math.round(((currentShort.currentCapital - currentShort.startCapital) / (currentShort.targetCapital - currentShort.startCapital)) * 100)))}%
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-emerald-500/70 font-bold uppercase tracking-widest mb-1">Vittorie</div>
-                                <div className="text-sm font-bold text-white">{winsShort} <span className="text-slate-500 text-xs">/ {currentShort.expectedWins}</span></div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-rose-500/70 font-bold uppercase tracking-widest mb-1">Perdite</div>
-                                <div className="text-sm font-bold text-white">{lossesShort} <span className="text-slate-500 text-xs">/ {currentShort.totalEvents - currentShort.expectedWins}</span></div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-blue-500/70 font-bold uppercase tracking-widest mb-1">Red Line</div>
-                                <div className="text-sm font-bold text-white">{currentShort.currentConsecutiveLosses} <span className="text-slate-500 text-xs">/ {mShort || '-'}</span></div>
-                            </div>
-                            <div className="bg-black/20 p-2 rounded-xl border border-white/5 text-center">
-                                <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Eventi Giocati</div>
-                                <div className="text-sm font-bold text-white">{eventsPlayedShort} <span className="text-slate-500 text-xs">/ {currentShort.totalEvents}</span></div>
-                            </div>
-                        </div>
+                    </div>
 
 
 
-                        {/* Transfer TO Long */}
-                        <div className="mt-4 border-t border-white/5 pt-4">
-                            <button
-                                onClick={() => setTransferModal('SHORT_TO_LONG')}
-                                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2"
-                            >
-                                <ArrowRightLeft size={12} /> Trasferisci a Long
-                            </button>
-                        </div>
+                    {/* Transfer TO Long */}
+                    <div className="mt-4 border-t border-white/5 pt-4">
+                        <button
+                            onClick={() => setTransferModal('SHORT_TO_LONG')}
+                            className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            <ArrowRightLeft size={12} /> Trasferisci a Long
+                        </button>
+                    </div>
 
-                        {/* Short History */}
-                        {currentShort.events.filter(e => !e.isSystemLog).length > 0 && (
-                            <div className="mt-6 border-t border-white/5 pt-4">
-                                <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Storico Trade Short</h4>
-                                <div className="max-h-56 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
-                                    {[...currentShort.events].filter(e => !e.isSystemLog).reverse().map(ev => (
-                                        <div key={ev.id} className="flex justify-between items-center p-2 rounded-lg bg-black/20 border border-white/5">
+                    {/* Short History */}
+                    {displayHistoryShort.length > 0 && (
+                        <div className="mt-6 border-t border-white/5 pt-4">
+                            <h4 className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Storico Trade Short</h4>
+                            <div className="max-h-56 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                                {displayHistoryShort.map((ev: any) => (
+                                    <div key={ev.id} className="flex flex-col p-2 rounded-lg bg-black/20 border border-white/5 transition-all hover:bg-black/30">
+                                        <div className="flex justify-between items-center w-full">
                                             <div className="flex items-center gap-2">
                                                 <span className={`font-black text-[10px] w-5 h-5 rounded flex items-center justify-center ${ev.isVoid ? 'bg-slate-700 text-slate-400' : ev.isWin ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                                                     {ev.isWin ? 'W' : (ev.isVoid ? 'V' : 'L')}
                                                 </span>
-                                                <span className="text-xs text-slate-400 font-medium whitespace-nowrap">
-                                                    Stake: €{Math.ceil(ev.stake).toLocaleString('it-IT')}
-                                                </span>
+                                                <div className="flex flex-col">
+                                                    <span className="text-xs text-slate-400 font-medium whitespace-nowrap">
+                                                        Stake: €{Math.ceil(ev.stake).toLocaleString('it-IT')}
+                                                    </span>
+                                                    {(ev.isHedge || ev.note === 'edge') && (
+                                                        <span className="text-[7px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1 rounded border border-blue-500/20 w-fit">
+                                                            EDGE TRADE
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div className="text-right">
                                                 <div className="text-xs font-bold text-white">€{Math.ceil(ev.capitalAfter).toLocaleString('it-IT')}</div>
                                             </div>
-                                            {ev.note && (
-                                                <div className="w-full mt-2 pt-2 border-t border-white/5 text-[9px] text-slate-500 italic">
-                                                    {ev.note}
-                                                </div>
-                                            )}
                                         </div>
-                                    ))}
-                                </div>
+                                        {ev.note && ev.note !== 'edge' && (
+                                            <div className="w-full mt-2 pt-2 border-t border-white/5 text-[9px] text-slate-500 italic">
+                                                {ev.note}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -1225,7 +1386,6 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                 <div className="grid grid-cols-1 gap-8">
                     {/* INTEGRATED EQUITY CURVE */}
                     <div className="bg-black/30 p-8 rounded-2xl border border-white/5 relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full -mr-32 -mt-32 blur-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
                         <div className="flex items-center justify-between mb-8">
                             <div>
                                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -1367,19 +1527,19 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                                     <div className="text-right">
                                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Totale Locked</div>
                                         <div className="text-sm font-black text-amber-500">
-                                            €{(twinState.snapshots || []).reduce((acc, s) => acc + s.capitalLocked, 0).toLocaleString('it-IT')}
+                                            €{(twinState?.snapshots || []).reduce((acc, s) => acc + s.capitalLocked, 0).toLocaleString('it-IT')}
                                         </div>
                                     </div>
                                     <div className="text-right border-l border-white/10 pl-6">
                                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Operazioni</div>
                                         <div className="text-sm font-black text-slate-300">
-                                            {(twinState.snapshots || []).length}
+                                            {(twinState?.snapshots || []).length}
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {twinState.snapshots && twinState.snapshots.length > 0 ? (
+                            {twinState?.snapshots && twinState.snapshots.length > 0 ? (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
                                     {twinState.snapshots.map((snap, i) => (
                                         <div key={i} className="bg-amber-500/5 border border-amber-500/10 p-3 rounded-xl flex items-center justify-between">
@@ -1407,7 +1567,17 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                             <div className="flex justify-end mb-3">
                                 <button
                                     onClick={() => {
-                                        onSaveLog(twinState.planLong);
+                                        // Create a consolidated summary plan for the journal
+                                        const consolidatedPlan = {
+                                            ...twinState.planLong,
+                                            id: `twin_log_${Date.now()}`,
+                                            name: `${instance.name} (Integrated Session)`,
+                                            startCapital: totalInitial,
+                                            currentCapital: totalCurrent,
+                                            events: [...(twinState.historyLong || []).flatMap(p => p.events), ...(twinState.historyShort || []).flatMap(p => p.events), ...currentLong.events, ...currentShort.events],
+                                            status: 'active'
+                                        };
+                                        onSaveLog(consolidatedPlan);
                                         alert('Sessione Twin salvata nel Diario!');
                                     }}
                                     className="group flex items-center gap-2 px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase rounded-xl border border-indigo-500/20 transition-all active:scale-95"
@@ -1424,63 +1594,65 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                         />
                     </div>
                 </div>
+
+                {/* Transfer Modal */}
+                {
+                    transferModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                            <div className="bg-[#181c21] rounded-3xl p-8 max-w-sm w-full border border-white/10 shadow-2xl relative">
+                                <button
+                                    onClick={() => {
+                                        setTransferModal(null);
+                                        setTransferAmount('');
+                                    }}
+                                    className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+                                >
+                                    <X size={20} />
+                                </button>
+
+                                <div className="flex items-center gap-3 mb-6">
+                                    <div className={`p-3 rounded-xl ${transferModal === 'LONG_TO_SHORT' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                                        <ArrowRightLeft size={20} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-white font-bold text-lg">Trasferimento</h3>
+                                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                            {transferModal === 'LONG_TO_SHORT' ? 'Da Long a Short' : 'Da Short a Long'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-xs text-slate-400 uppercase tracking-widest font-bold mb-2 block">Importo (€)</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max={transferModal === 'LONG_TO_SHORT' ? currentLong.currentCapital : currentShort.currentCapital}
+                                            value={transferAmount}
+                                            onChange={(e) => setTransferAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                                            className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
+                                            placeholder="Es. 100"
+                                            autoFocus
+                                        />
+                                        <div className="text-[10px] text-slate-500 mt-2 text-right">
+                                            Disponibile: €{Math.floor(transferModal === 'LONG_TO_SHORT' ? currentLong.currentCapital : currentShort.currentCapital)}
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={handleTransfer}
+                                        disabled={!transferAmount || Number(transferAmount) <= 0 || Number(transferAmount) > (transferModal === 'LONG_TO_SHORT' ? currentLong.currentCapital : currentShort.currentCapital)}
+                                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+                                    >
+                                        Conferma Spostamento
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
             </div>
-
-            {/* Transfer Modal */}
-            {transferModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="bg-[#181c21] rounded-3xl p-8 max-w-sm w-full border border-white/10 shadow-2xl relative">
-                        <button
-                            onClick={() => {
-                                setTransferModal(null);
-                                setTransferAmount('');
-                            }}
-                            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
-                        >
-                            <X size={20} />
-                        </button>
-
-                        <div className="flex items-center gap-3 mb-6">
-                            <div className={`p-3 rounded-xl ${transferModal === 'LONG_TO_SHORT' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                                <ArrowRightLeft size={20} />
-                            </div>
-                            <div>
-                                <h3 className="text-white font-bold text-lg">Trasferimento</h3>
-                                <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                                    {transferModal === 'LONG_TO_SHORT' ? 'Da Long a Short' : 'Da Short a Long'}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div>
-                                <label className="text-xs text-slate-400 uppercase tracking-widest font-bold mb-2 block">Importo (€)</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    max={transferModal === 'LONG_TO_SHORT' ? currentLong.currentCapital : currentShort.currentCapital}
-                                    value={transferAmount}
-                                    onChange={(e) => setTransferAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500"
-                                    placeholder="Es. 100"
-                                    autoFocus
-                                />
-                                <div className="text-[10px] text-slate-500 mt-2 text-right">
-                                    Disponibile: €{Math.floor(transferModal === 'LONG_TO_SHORT' ? currentLong.currentCapital : currentShort.currentCapital)}
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleTransfer}
-                                disabled={!transferAmount || Number(transferAmount) <= 0 || Number(transferAmount) > (transferModal === 'LONG_TO_SHORT' ? currentLong.currentCapital : currentShort.currentCapital)}
-                                className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-500/20"
-                            >
-                                Conferma Spostamento
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

@@ -7,7 +7,7 @@ import GatekeeperChecklist from './GatekeeperChecklist';
 import ActiveRulesCard from './ActiveRulesCard';
 import WeeklyTargetCard from './WeeklyTargetCard';
 import HistoryLog from './HistoryLog';
-import { AlertTriangle, LifeBuoy, Shield, ArrowLeft, Network, CheckCircle, Save } from 'lucide-react';
+import { AlertTriangle, LifeBuoy, Shield, ArrowLeft, Network, CheckCircle } from 'lucide-react';
 import { getRescueAdvisory } from '../utils/masaLogic';
 import type { MasanielloInstance, MasaPlan } from '../types/masaniello';
 
@@ -40,6 +40,7 @@ const SimplifiedMasanielloView: React.FC<SimplifiedMasanielloViewProps> = ({
         currentPlan,
         history,
         handleFullBet,
+        handleHedgedBet,
         handlePartialWin,
         handlePartialLoss,
         handleBreakEven,
@@ -140,16 +141,14 @@ const SimplifiedMasanielloView: React.FC<SimplifiedMasanielloViewProps> = ({
 
             console.log('[SimpleMasa] Auto-resolving session:', { hOutcome, mOutcome });
 
-            // CRITICAL: Clear session immediately to avoid infinite loop by effect re-triggering
+            // CRITICAL: Clear session immediately
             setSession(null);
 
-            handleFullBet(hOutcome, q, 'HEDGE TRADE', {}, 0, true);
-            setTimeout(() => {
-                const skipSeq = hOutcome === true && mOutcome === false;
-                handleFullBet(mOutcome, q, 'MAIN TRADE (HEDGED)', {}, 0, false, skipSeq);
-            }, 50);
+            // Use the atomic handler to update both trades at once
+            handleHedgedBet(hOutcome, mOutcome, q, undefined, activePair || 'HEDGE SESSION', checklist);
+            resetChecklist();
         }
-    }, [session, currentPlan, handleFullBet]);
+    }, [session, currentPlan, handleHedgedBet, checklist, activePair]);
 
     const handleHedgeOutcome = (isWin: boolean) => {
         setSession(prev => prev ? { ...prev, hedge: isWin } : null);
@@ -334,21 +333,6 @@ const SimplifiedMasanielloView: React.FC<SimplifiedMasanielloViewProps> = ({
                 </div>
             )}
 
-            {/* SAVE LOG ACTION BAR */}
-            {onSaveLog && (
-                <div style={{ gridColumn: '1 / -1' }} className="flex justify-end">
-                    <button
-                        onClick={() => {
-                            onSaveLog(currentPlan);
-                            alert('Sessione salvata correttamente nel Diario!');
-                        }}
-                        className="group flex items-center gap-2 px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase rounded-xl border border-indigo-500/20 transition-all active:scale-95"
-                    >
-                        <Save size={14} className="group-hover:scale-110 transition-transform" />
-                        Salva Diario
-                    </button>
-                </div>
-            )}
 
             {/* TARGET REACHED SUCCESS BANNER (FATHER / STANDALONE) */}
             {isTargetReached && currentPlan.hierarchyType !== 'SON' && (
@@ -527,6 +511,8 @@ const SimplifiedMasanielloView: React.FC<SimplifiedMasanielloViewProps> = ({
                     history={history}
                     expandedHistory={expandedHistory}
                     setExpandedHistory={setExpandedHistory}
+                    onSaveLog={onSaveLog}
+                    currentPlan={currentPlan}
                 />
             </div>
         </>

@@ -159,20 +159,32 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
     const commissionRate = (config.tradingCommission || 0) / 100;
     const effectiveQuotaInForm = config.quota / (1 + commissionRate);
 
-    const previewProfit = config.role === 'twin' && isAsymmetricTwin
+    const profitLong = config.role === 'twin'
         ? calculateMaxNetProfit(
-            config.twinConfig?.capitalLong || 0,
-            config.twinConfig?.totalEventsLong || 10,
-            config.twinConfig?.expectedWinsLong || 7,
-            (config.twinConfig?.quotaLong || 1.90) / (1 + commissionRate),
+            config.twinConfig?.capitalLong || (effectiveCapital / 2),
+            config.twinConfig?.totalEventsLong || config.totalEvents,
+            config.twinConfig?.expectedWinsLong || config.expectedWins,
+            (config.twinConfig?.quotaLong || config.quota) / (1 + (commissionRate || 0)),
             config.maxConsecutiveLosses || 0
-        ) + calculateMaxNetProfit(
-            config.twinConfig?.capitalShort || 0,
-            config.twinConfig?.totalEventsShort || 10,
-            config.twinConfig?.expectedWinsShort || 7,
-            (config.twinConfig?.quotaShort || 1.90) / (1 + commissionRate),
+        ) : 0;
+
+    const profitShort = config.role === 'twin'
+        ? calculateMaxNetProfit(
+            config.twinConfig?.capitalShort || (effectiveCapital / 2),
+            config.twinConfig?.totalEventsShort || config.totalEvents,
+            config.twinConfig?.expectedWinsShort || config.expectedWins,
+            (config.twinConfig?.quotaShort || config.quota) / (1 + (commissionRate || 0)),
             config.maxConsecutiveLosses || 0
-        )
+        ) : 0;
+
+    const roiLong = config.role === 'twin' && (config.twinConfig?.capitalLong || (effectiveCapital / 2)) > 0
+        ? (profitLong / (config.twinConfig?.capitalLong || (effectiveCapital / 2))) * 100 : 0;
+
+    const roiShort = config.role === 'twin' && (config.twinConfig?.capitalShort || (effectiveCapital / 2)) > 0
+        ? (profitShort / (config.twinConfig?.capitalShort || (effectiveCapital / 2))) * 100 : 0;
+
+    const previewProfit = config.role === 'twin'
+        ? profitLong + profitShort
         : calculateMaxNetProfit(
             effectiveCapital,
             config.totalEvents,
@@ -353,6 +365,12 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
                             <div className="font-bold text-2xl lg:text-3xl tracking-tighter text-[#00d4aa]">
                                 +€{isNaN(previewProfit) ? '---' : Math.ceil(previewProfit).toLocaleString('it-IT')}
                             </div>
+                            {config.role === 'twin' && (
+                                <div className="flex justify-center gap-3 mt-1.5 border-t border-white/5 pt-1.5">
+                                    <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">L: +€{Math.ceil(profitLong).toLocaleString('it-IT')}</span>
+                                    <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">S: +€{Math.ceil(profitShort).toLocaleString('it-IT')}</span>
+                                </div>
+                            )}
                             <div className="text-[11px] text-[#5a6272] mt-1">su singolo ciclo</div>
                         </div>
                         <div className="bg-[#0f1623] p-6 group hover:bg-[#181c21] transition-colors relative">
@@ -362,6 +380,12 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
                                 {isNaN(previewROI) ? '---' : Math.ceil(previewROI)}%
                                 <span className="text-xs opacity-60 font-medium tracking-normal">(quota {((previewROI / 100) + 1).toFixed(2)})</span>
                             </div>
+                            {config.role === 'twin' && (
+                                <div className="flex justify-center gap-3 mt-1.5 border-t border-white/5 pt-1.5">
+                                    <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">L: {Math.ceil(roiLong)}%</span>
+                                    <span className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">S: {Math.ceil(roiShort)}%</span>
+                                </div>
+                            )}
                             <div className="text-[11px] text-[#5a6272] mt-1">
                                 {config.role === 'twin' && isAsymmetricTwin ? (
                                     <div className="flex flex-col items-center gap-0.5">
@@ -884,11 +908,19 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
                             </div>
                             <div className="p-0">
                                 <div className="grid grid-cols-5 gap-1 p-4 bg-black/10">
-                                    {['standard', 'master', 'slave', 'differential', 'twin'].map((role) => (
+                                    {['standard', 'differential', 'twin'].map((role) => (
                                         <button
                                             key={role}
                                             type="button"
-                                            onClick={() => setConfig({ ...config, role: role as any })}
+                                            onClick={() => {
+                                                const updates: any = { role: role as any };
+                                                if (role === 'twin') {
+                                                    updates.accumulationPercent = 0;
+                                                    updates.weeklyTargetPercentage = 0;
+                                                    updates.milestoneBankPercentage = 0;
+                                                }
+                                                setConfig({ ...config, ...updates });
+                                            }}
                                             className={`py-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${config.role === role
                                                 ? 'bg-[#4f8ef7]/10 border-[#4f8ef7]/30 text-[#4f8ef7] shadow-lg shadow-[#4f8ef7]/5'
                                                 : 'bg-transparent border-transparent text-[#5a6272] hover:text-[#8a919f]'

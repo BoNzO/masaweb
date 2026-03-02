@@ -53,6 +53,25 @@ export const useMultiMasaniello = () => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(multiState));
     }, [multiState]);
 
+    // Auto-repair totalDeposited if missing but instances exist
+    useEffect(() => {
+        if (multiState.capitalPool.totalDeposited === 0) {
+            const activeAllocations = Object.values(multiState.instances)
+                .filter(i => i.status === 'active')
+                .reduce((sum, i) => sum + i.absoluteStartCapital, 0);
+
+            if (activeAllocations > 0 || multiState.capitalPool.totalAvailable > 0) {
+                setMultiState(prev => ({
+                    ...prev,
+                    capitalPool: {
+                        ...prev.capitalPool,
+                        totalDeposited: activeAllocations + prev.capitalPool.totalAvailable
+                    }
+                }));
+            }
+        }
+    }, []);
+
     // Create a new Masaniello instance
     const createMasaniello = useCallback((config: Config, initialCapital?: number, activeRules?: string[]) => {
         setMultiState(prev => {
@@ -150,6 +169,7 @@ export const useMultiMasaniello = () => {
                 capitalPool: {
                     ...prev.capitalPool,
                     totalAvailable: prev.capitalPool.totalAvailable - capitalToAllocate,
+                    totalDeposited: prev.capitalPool.totalDeposited === 0 ? capitalToAllocate : prev.capitalPool.totalDeposited,
                     allocations: {
                         ...prev.capitalPool.allocations,
                         [newId]: capitalToAllocate
@@ -195,10 +215,29 @@ export const useMultiMasaniello = () => {
                 return prev;
             }
 
-            // Calculate capital to release
-            const currentCapital = instance.currentPlan?.currentCapital || instance.absoluteStartCapital;
-            const bankedAmount = instance.history.reduce((sum, plan) => sum + (plan.accumulatedAmount || 0), 0);
-            const totalCapital = currentCapital + bankedAmount;
+            // Calculate capital to release (total current worth of the instance)
+            let historyProfits = 0;
+            let currentProfits = 0;
+
+            if (instance.type === 'twin' && instance.twinState) {
+                // For Twin, individual side histories (historyLong/historyShort) are the source of truth
+                const hl = instance.twinState.historyLong || [];
+                const hs = instance.twinState.historyShort || [];
+                historyProfits = hl.reduce((sum, p) => sum + (p.currentCapital - p.startCapital), 0) +
+                    hs.reduce((sum, p) => sum + (p.currentCapital - p.startCapital), 0);
+
+                currentProfits = (instance.twinState.planLong.currentCapital - instance.twinState.planLong.startCapital) +
+                    (instance.twinState.planShort.currentCapital - instance.twinState.planShort.startCapital);
+            } else {
+                historyProfits = instance.history.reduce((sum, p) => sum + (p.currentCapital - p.startCapital), 0);
+                if (instance.type === 'differential' && instance.differentialState) {
+                    currentProfits = (instance.differentialState.realCapital || instance.absoluteStartCapital) - instance.absoluteStartCapital;
+                } else if (instance.currentPlan) {
+                    currentProfits = instance.currentPlan.currentCapital - instance.currentPlan.startCapital;
+                }
+            }
+
+            const totalCapital = roundTwo(instance.absoluteStartCapital + historyProfits + currentProfits);
 
             // Create transaction
             const transaction: CapitalPoolTransaction = {
@@ -242,7 +281,12 @@ export const useMultiMasaniello = () => {
                         instanceName: instance.name,
                         instanceType: instance.type || 'standard',
                         timestamp: new Date().toISOString(),
-                        plan: { ...(instance.currentPlan || instance.history[instance.history.length - 1]) }
+                        // For complex types, saving a consolidated snapshot or the primary active plan
+                        plan: (instance.type === 'twin' && instance.twinState)
+                            ? { ...instance.twinState.planLong, name: `${instance.name} (Twin Combined)`, currentCapital: totalCapital }
+                            : (instance.type === 'differential' && instance.differentialState)
+                                ? { ...instance.differentialState.planA, name: `${instance.name} (Differential)`, currentCapital: totalCapital }
+                                : { ...(instance.currentPlan || instance.history[instance.history.length - 1]) }
                     },
                     ...(prev.savedLogs || [])
                 ]
@@ -584,18 +628,7 @@ export const useMultiMasaniello = () => {
                 }
             };
 
-            // FATHER-SON AUTO RESOLUTION
             const updatedInst = newState.instances[masaId];
-            if (updatedInst?.currentPlan?.hierarchyType === 'SON') {
-                console.log('[AutoResolve] Checking son:', masaId, {
-                    instStatus: updatedInst.status,
-                    planStatus: updatedInst.currentPlan?.status,
-                    missionQueued: updatedInst.missionResultQueued,
-                    remainingWins: updatedInst.currentPlan?.remainingWins,
-                    remainingEvents: updatedInst.currentPlan?.remainingEvents,
-                    eventsPlayed: updatedInst.currentPlan?.events?.filter((e: any) => !e.isSystemLog).length
-                });
-            }
             if (updatedInst?.status === 'active' &&
                 updatedInst.currentPlan?.hierarchyType === 'SON' &&
                 !updatedInst.missionResultQueued) {
@@ -728,19 +761,6 @@ export const useMultiMasaniello = () => {
             // Set maxNetProfit to match the mission target (father's required return)
             // so the plan's internal math is consistent with the mission
             const sonMaxNetProfit = sonTarget - stakeValue;
-            console.log('[SpawnSon] Creating son:', {
-                newId,
-                stakeValue,
-                fatherQuota,
-                sonTarget,
-                sonMaxNetProfit,
-                initialPlanStatus: initialPlan.status,
-                initialPlanTarget: initialPlan.targetCapital,
-                sonConfigExpWins: sonConfig.expectedWins,
-                sonConfigTotalEvents: sonConfig.totalEvents,
-                sonConfigQuota: sonConfig.quota,
-                hasLastSonConfig: !!fatherInstance.lastSonConfig
-            });
             const sonInstance: MasanielloInstance = {
                 id: newId,
                 number: nextNumber,
@@ -1082,31 +1102,57 @@ export const useMultiMasaniello = () => {
         const combinedChartData: ChartDataPoint[] = [];
         const timelineEvents: { timestamp: string; masaId: string }[] = [];
         let totalWeeklyTargetsReached = 0;
-        let totalMasterCapital = 0;
-        let totalSlaveCapital = 0;
+
 
         // Count stats from ALL instances currently in state (active + archived)
         Object.values(multiState.instances).forEach(instance => {
             if (!instance) return;
-            const currentCapital = instance.currentPlan?.currentCapital || instance.absoluteStartCapital;
-            const banked = instance.history.reduce((sum: number, plan: any) => sum + (plan.accumulatedAmount || 0), 0);
-
-            // Current Worth: Only count if it's currently active (archived ones already released capital to totalAvailable)
+            let instanceWorth = 0;
             if (instance.status === 'active') {
-                totalWorth += currentCapital + banked;
+                let historyProfits = 0;
+                let currentProfits = 0;
+
+                if (instance.type === 'twin' && instance.twinState) {
+                    const hl = instance.twinState.historyLong || [];
+                    const hs = instance.twinState.historyShort || [];
+                    historyProfits = hl.reduce((sum, p) => sum + (p.currentCapital - p.startCapital), 0) +
+                        hs.reduce((sum, p) => sum + (p.currentCapital - p.startCapital), 0);
+
+                    currentProfits = (instance.twinState.planLong.currentCapital - instance.twinState.planLong.startCapital) +
+                        (instance.twinState.planShort.currentCapital - instance.twinState.planShort.startCapital);
+                } else {
+                    historyProfits = instance.history.reduce((sum, p) => sum + (p.currentCapital - p.startCapital), 0);
+                    if (instance.type === 'differential' && instance.differentialState) {
+                        currentProfits = (instance.differentialState.realCapital || instance.absoluteStartCapital) - instance.absoluteStartCapital;
+                    } else if (instance.currentPlan) {
+                        currentProfits = instance.currentPlan.currentCapital - instance.currentPlan.startCapital;
+                    }
+                }
+
+                instanceWorth = instance.absoluteStartCapital + historyProfits + currentProfits;
+                totalWorth += instanceWorth;
             }
 
+            const banked = instance.history.reduce((sum: number, plan: any) => sum + (plan.accumulatedAmount || 0), 0);
             totalBanked += banked;
+
             const instanceTargets = (instance.history || []).reduce((sum: number, p: any) => sum + (p.weeklyTargetsReached || 0), 0) + (instance.currentPlan?.weeklyTargetsReached || 0);
             totalWeeklyTargetsReached += instanceTargets;
 
             const allPlans = [...instance.history];
-            if (instance.currentPlan) allPlans.push(instance.currentPlan);
+            if (instance.type === 'twin' && instance.twinState) {
+                allPlans.push(instance.twinState.planLong);
+                allPlans.push(instance.twinState.planShort);
+            } else if (instance.type === 'differential' && instance.differentialState) {
+                allPlans.push(instance.differentialState.planA);
+                allPlans.push(instance.differentialState.planB);
+            } else if (instance.currentPlan) {
+                allPlans.push(instance.currentPlan);
+            }
 
             allPlans.forEach(plan => {
                 plan.events.forEach(event => {
                     timelineEvents.push({ timestamp: event.timestamp, masaId: instance.id });
-                    // EXCLUDE delegation summaries and system logs from global W/L count
                     if (!event.isSystemLog && !event.isVoid && !(event as any).isHierarchySummary) {
                         if (event.isWin) totalWins++;
                         else totalLosses++;
@@ -1114,10 +1160,7 @@ export const useMultiMasaniello = () => {
                 });
             });
 
-            if (instance.status === 'active') {
-                if (instance.config.role === 'master') totalMasterCapital += currentCapital;
-                if (instance.config.role === 'slave') totalSlaveCapital += currentCapital;
-            }
+
         });
 
         const sortedTimeline = timelineEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -1149,8 +1192,11 @@ export const useMultiMasaniello = () => {
         const totalInitialCapital = multiState.capitalPool.totalDeposited > 0
             ? multiState.capitalPool.totalDeposited
             : Object.values(multiState.instances)
-                .filter(i => i.status === 'active' && i.currentPlan?.hierarchyType !== 'SON')
-                .reduce((sum, i) => sum + i.absoluteStartCapital, 0);
+                .reduce((sum, i) => sum + i.absoluteStartCapital, 0) + multiState.capitalPool.totalAvailable;
+
+        // Final adjustment: if everything is archived and pool is empty, we must have at least the deposited amount 
+        // to avoid ROI jumping to infinity.
+        const effectiveInitial = totalInitialCapital || 1000;
 
         // Add lifetime stats from deleted plans and apply offsets
         const finalWins = Math.max(0, totalWins + (multiState.capitalPool.lifetimeWins || 0) - (multiState.capitalPool.resetWinsOffset || 0));
@@ -1159,17 +1205,15 @@ export const useMultiMasaniello = () => {
         const totalDays = Math.ceil((finalWins + finalLosses) / 2.5);
 
         return {
-            totalInitialCapital,
+            totalInitialCapital: effectiveInitial,
             totalWorth,
             totalBanked,
-            totalProfit: totalWorth - totalInitialCapital,
-            totalGrowth: totalInitialCapital > 0 ? ((totalWorth - totalInitialCapital) / totalInitialCapital) * 100 : 0,
+            totalProfit: totalWorth - effectiveInitial,
+            totalGrowth: effectiveInitial > 0 ? ((totalWorth - effectiveInitial) / effectiveInitial) * 100 : 0,
             totalWins: finalWins,
             totalLosses: finalLosses,
             totalWeeklyTargetsReached: Math.max(0, totalWeeklyTargetsReached - (multiState.capitalPool.resetTargetsOffset || 0)),
-            totalMasterCapital,
-            totalSlaveCapital,
-            totalDays: Math.max(0, totalDays), // Use original logic or add offset if needed
+            totalDays: Math.max(0, totalDays),
             combinedChartData
         };
     }, [multiState]);

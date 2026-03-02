@@ -7,9 +7,11 @@ interface HistoryLogProps {
     history: MasaPlan[];
     expandedHistory: number | null;
     setExpandedHistory: (id: number | null) => void;
+    onSaveLog?: (plan: MasaPlan) => void;
+    currentPlan?: MasaPlan;
 }
 
-const HistoryLog: React.FC<HistoryLogProps> = ({ history, expandedHistory, setExpandedHistory }) => {
+const HistoryLog: React.FC<HistoryLogProps> = ({ history, expandedHistory, setExpandedHistory, onSaveLog, currentPlan }) => {
     if (history.length === 0) return null;
 
     return (
@@ -24,6 +26,19 @@ const HistoryLog: React.FC<HistoryLogProps> = ({ history, expandedHistory, setEx
                         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{history.length} sessioni completate</p>
                     </div>
                 </div>
+
+                {onSaveLog && currentPlan && (
+                    <button
+                        onClick={() => {
+                            onSaveLog(currentPlan);
+                            alert('Sessione salvata correttamente nel Diario!');
+                        }}
+                        className="group flex items-center gap-2 px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase rounded-xl border border-indigo-500/20 transition-all active:scale-95"
+                    >
+                        <Download size={14} className="group-hover:scale-110 transition-transform" />
+                        Salva Diario
+                    </button>
+                )}
             </div>
 
             <div className="divide-y divide-white/5">

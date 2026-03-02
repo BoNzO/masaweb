@@ -138,6 +138,7 @@ export interface MasaPlan {
   fedAmount?: number;
   preRescueConfig?: Partial<Config>; // Stores original config before Rescue Mode modifications
   elasticStretchesUsed: number;
+  updatedAt?: string;
   elasticConfig?: ElasticConfig;
   hierarchyType: PlanHierarchy;
   tradingCommission?: number;
@@ -275,8 +276,6 @@ export interface AggregatedStats {
   totalWins: number;
   totalLosses: number;
   totalWeeklyTargetsReached: number;
-  totalMasterCapital: number;
-  totalSlaveCapital: number;
   totalDays: number;
   combinedChartData: ChartDataPoint[];
 }

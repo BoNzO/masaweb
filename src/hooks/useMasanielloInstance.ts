@@ -57,7 +57,6 @@ export const useMasanielloInstance = (
         const hasPlanContentDiff = instance.currentPlan && JSON.stringify(instance.currentPlan) !== JSON.stringify(currentHookPlan);
 
         if (hasConfigDiff || hasHistoryDiff || hasRulesDiff || hasPlanIdDiff || hasPlanContentDiff) {
-            console.log(`[Instance ${instance.id}] Rehydrating due to parent change...`, { hasConfigDiff, hasPlanIdDiff });
             isExternalUpdating.current = true;
 
             if (hasConfigDiff) masaniello.setConfig(instance.config);
@@ -88,7 +87,6 @@ export const useMasanielloInstance = (
         }
 
         const action = instance.actionsQueue[0];
-        console.log(`[Instance ${instance.id}] Started processing action:`, action.type);
 
         if (action.type === 'RESOLVE_EVENT') {
             const { isWin, quota, surplus } = action.payload;
@@ -119,14 +117,6 @@ export const useMasanielloInstance = (
             // If we are currently rehydrating FROM parent, block sync-back UNLESS we have an action result to send
             if (isExternalUpdating.current && !hasQueueToClear) return;
 
-            console.log(`[Instance ${instance.id}] Syncing back...`, {
-                hasPlanChanged, hasConfigChanged, hasRulesChanged, hasQueueToClear,
-                hookPlanStatus: masaniello.currentPlan?.status,
-                hookPlanHierarchy: masaniello.currentPlan?.hierarchyType,
-                hookPlanIsNull: masaniello.currentPlan === null,
-                instancePlanStatus: instance.currentPlan?.status,
-                isExternalUpdating: isExternalUpdating.current
-            });
             onUpdate({
                 config: masaniello.config,
                 currentPlan: masaniello.currentPlan,
