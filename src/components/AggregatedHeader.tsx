@@ -20,21 +20,21 @@ const AggregatedHeader: React.FC<AggregatedHeaderProps> = ({ stats, poolCapital 
                 <div className="bg-slate-900/50 rounded-lg p-3 border border-blue-500/30">
                     <div className="flex items-center gap-2 mb-1">
                         <DollarSign size={14} className="text-blue-400" />
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Total Capital</span>
-                    </div>
-                    <p className="text-xl font-black text-white">
-                        €{(stats.totalWorth + stats.totalBanked).toFixed(2)}
-                    </p>
-                </div>
-
-                {/* Total Worth */}
-                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
-                    <div className="flex items-center gap-2 mb-1">
-                        <Activity size={14} className="text-green-400" />
-                        <span className="text-[10px] text-slate-400 uppercase font-bold">Total Worth</span>
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Total System Worth</span>
                     </div>
                     <p className="text-xl font-black text-white">
                         €{stats.totalWorth.toFixed(2)}
+                    </p>
+                </div>
+
+                {/* Active Capital */}
+                <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-700">
+                    <div className="flex items-center gap-2 mb-1">
+                        <Activity size={14} className="text-green-400" />
+                        <span className="text-[10px] text-slate-400 uppercase font-bold">Active Capital</span>
+                    </div>
+                    <p className="text-xl font-black text-white">
+                        €{(stats.totalWorth - stats.totalBanked).toFixed(2)}
                     </p>
                 </div>
 

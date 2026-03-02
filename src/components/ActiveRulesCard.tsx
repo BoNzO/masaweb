@@ -2,12 +2,13 @@ import React from 'react';
 import { ChevronDown, CheckSquare, ShieldCheck } from 'lucide-react';
 
 export const AVAILABLE_RULES = [
-    { id: 'auto_bank_100', label: 'Banking Target Settimanale', desc: 'Incassa % profitto al raggiungimento del target' },
-    { id: 'profit_milestone', label: 'Banking Progressivo (Milestone)', desc: 'Incassa % profitto ogni volta che raddoppi il capitale' },
     { id: 'smart_auto_close', label: 'Smart Auto Close', desc: 'Chiudi in pari se possibile dopo sequenza negativa' },
-    { id: 'stop_loss', label: 'Stop Loss', desc: 'Interrompi il piano se raggiungi il limite di perdite consecutive' },
     { id: 'first_win', label: 'Prima Vittoria Garantita (Bonus)', desc: 'Rimuovi rischio iniziale dopo prima vittoria' },
-    { id: 'back_positive', label: 'Torna in Positivo', desc: 'Regola dinamica per recupero rapido' }
+    { id: 'back_positive', label: 'Torna in Positivo', desc: 'Regola dinamica per recupero rapido' },
+    { id: 'auto_bank_100', label: 'Auto Banking (Target Sett.)', desc: 'Chiudi e accantona quando raggiungi il target settimanale' },
+    { id: 'profit_milestone', label: 'Profit Milestone', desc: 'Chiudi e accantona al raggiungimento di multipli del capitale' },
+    { id: 'profit_90', label: 'Profit 90%', desc: 'Chiudi il ciclo quando raggiungi il 90% del profitto massimo' },
+    { id: 'impossible', label: 'Stop Impossibile', desc: 'Ferma il ciclo se l\'obiettivo non è più raggiungibile matematicamente' }
 ];
 
 interface ActiveRulesCardProps {

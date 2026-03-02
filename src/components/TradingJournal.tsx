@@ -2,12 +2,10 @@ import React from 'react';
 import {
     TrendingUp,
     BarChart3,
-    Calendar,
     Activity,
     Target,
     ArrowUpRight,
     ArrowDownRight,
-    Search,
     BookOpen,
     ShieldAlert
 } from 'lucide-react';
@@ -92,7 +90,7 @@ const TradingJournal: React.FC<TradingJournalProps> = ({ stats }) => {
                                 contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', fontSize: '12px' }}
                                 labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
                                 labelFormatter={(label) => new Date(label).toLocaleString()}
-                                formatter={(value: number) => [`€${value.toFixed(2)}`, 'Equity']}
+                                formatter={(value: number) => [`€${Math.ceil(value).toLocaleString('it-IT')}`, 'Equity']}
                             />
                             <Area
                                 type="monotone"
@@ -148,7 +146,7 @@ const TradingJournal: React.FC<TradingJournalProps> = ({ stats }) => {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <div className="text-xs font-mono text-slate-400">€{Math.abs(change).toFixed(2)}</div>
+                                            <div className="text-xs font-mono text-slate-400">€{Math.ceil(Math.abs(change)).toLocaleString('it-IT')}</div>
                                         </td>
                                         <td className="px-6 py-4">
                                             {change > 0 ? (
@@ -166,11 +164,11 @@ const TradingJournal: React.FC<TradingJournalProps> = ({ stats }) => {
                                             )}
                                         </td>
                                         <td className="px-6 py-4">
-                                            <div className="text-xs font-black text-slate-200">€{point.capital.toFixed(2)}</div>
+                                            <div className="text-xs font-black text-slate-200">€{Math.ceil(point.capital).toLocaleString('it-IT')}</div>
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className={`text-xs font-bold ${change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                {change >= 0 ? '+' : ''}{percent.toFixed(2)}%
+                                                {change >= 0 ? '+' : ''}{Math.ceil(percent)}%
                                             </div>
                                         </td>
                                     </tr>

@@ -7,6 +7,8 @@ import SimplifiedMasanielloView from './components/SimplifiedMasanielloView';
 import NewMasanielloForm from './components/NewMasanielloForm';
 import CapitalPoolManager from './components/CapitalPoolManager';
 import ConfigurationPanel from './components/ConfigurationPanel';
+import DifferentialMasanielloView from './components/DifferentialMasanielloView';
+import TwinMasanielloView from './components/TwinMasanielloView';
 
 const App = () => {
   const {
@@ -20,10 +22,16 @@ const App = () => {
     setAvailableCapital,
     updateInstance,
     feedSlave,
+    feedBackToMaster,
     setCurrentView,
     aggregatedStats,
     canCreateNew,
-    resetSystem
+    spawnSonPlan,
+    resolveSonMission,
+    resetSystem,
+    resetGlobalStats,
+    savePlanLog,
+    deleteSavedLog
   } = useMultiMasaniello();
 
   const [showPoolManager, setShowPoolManager] = useState(false);
@@ -70,6 +78,7 @@ const App = () => {
           stats={aggregatedStats}
           poolCapital={multiState.capitalPool.totalAvailable}
           onTogglePool={() => setShowPoolManager(!showPoolManager)}
+          onResetGlobalStats={resetGlobalStats}
         />
 
         {/* Tabs */}
@@ -95,9 +104,9 @@ const App = () => {
               <div className="card-redesign">
                 <CapitalPoolManager
                   pool={multiState.capitalPool}
-                  onAddCapital={addCapitalToPool}
                   onSetAvailable={setAvailableCapital}
                   onClose={() => setShowPoolManager(false)}
+                  onRemoveAllocation={deleteMasaniello}
                 />
               </div>
             </div>
@@ -110,6 +119,8 @@ const App = () => {
                 <OverviewDashboard
                   stats={aggregatedStats}
                   onReset={resetSystem}
+                  savedLogs={multiState.savedLogs}
+                  onDeleteLog={deleteSavedLog}
                 />
               )}
 
@@ -121,7 +132,7 @@ const App = () => {
                       👋 Benvenuto nel Sistema Multi-Masaniello!
                     </h3>
                     <p className="text-sm" style={{ color: 'var(--txt-secondary)', marginBottom: '24px' }}>
-                      Puoi gestire fino a 3 Masanielli contemporaneamente, ognuno con capitale e configurazione indipendenti.
+                      Puoi gestire fino a 5 Masanielli contemporaneamente, ognuno con capitale e configurazione indipendenti.
                     </p>
                     <button
                       onClick={() => setCurrentView('new')}
@@ -145,6 +156,9 @@ const App = () => {
                   setConfig={(newConfig) => updateInstance(currentInstance.id, { config: newConfig })}
                   onStart={() => setShowConfig(false)}
                   activeRules={currentInstance.activeRules}
+                  missionTarget={currentInstance.currentPlan?.hierarchyType === 'SON' ? currentInstance.currentPlan.targetCapital : undefined}
+                  fatherStake={currentInstance.currentPlan?.hierarchyType === 'SON' ? currentInstance.currentPlan.fatherStake : undefined}
+                  fatherQuota={currentInstance.currentPlan?.hierarchyType === 'SON' ? currentInstance.currentPlan.fatherQuota : undefined}
                   toggleRule={(ruleId) => {
                     const rules = currentInstance.activeRules || [];
                     const newRules = rules.includes(ruleId)
@@ -154,12 +168,32 @@ const App = () => {
                   }}
                 />
               </div>
+            ) : currentInstance.type === 'differential' ? (
+              <DifferentialMasanielloView
+                key={currentInstance.id}
+                instance={currentInstance}
+                onUpdate={(updates) => handleUpdateInstance(currentInstance.id, updates)}
+                onSaveLog={(plan: any) => savePlanLog(currentInstance.id, plan)}
+              />
+            ) : currentInstance.type === 'twin' ? (
+              <TwinMasanielloView
+                key={currentInstance.id}
+                instance={currentInstance}
+                onUpdate={(updates) => handleUpdateInstance(currentInstance.id, updates)}
+                onSaveLog={(plan: any) => savePlanLog(currentInstance.id, plan)}
+              />
             ) : (
               <SimplifiedMasanielloView
                 key={currentInstance.id}
                 instance={currentInstance}
                 onUpdate={(updates) => handleUpdateInstance(currentInstance.id, updates)}
-                onFeed={(amount) => feedSlave(currentInstance.id, amount)}
+                onSpawnSon={(fatherQuota: number) => spawnSonPlan(currentInstance.id, fatherQuota)}
+                onSelectView={setCurrentView}
+                onFeed={(amount: number) => feedSlave(currentInstance.id, amount)}
+                onFeedBack={(amount: number) => feedBackToMaster(currentInstance.id, amount)}
+                onResolveMission={(isWin: boolean) => resolveSonMission(currentInstance.id, isWin)}
+                onSaveLog={(plan: any) => savePlanLog(currentInstance.id, plan)}
+                activeInstances={multiState.activeInstanceIds.map(id => multiState.instances[id]).filter(Boolean)}
               />
             )
           )}

@@ -518,6 +518,13 @@ Tutti i dati sono salvati in **localStorage**:
 
 ---
 
+### 6. Standard di Visualizzazione
+- **Arrotondamento**: Tutti i valori monetari sono arrotondati per eccesso all'intero superiore (`Math.ceil()`).
+- **Decimali**: Gli importi monetari non mostrano decimali, garantendo un'interfaccia pulita e focalizzata sul capitale reale.
+- **Locale**: Formattazione italiana (`it-IT`), es. `€1.250`.
+
+---
+
 ## 🚀 Installazione e Avvio
 
 ### Prerequisiti
@@ -659,5 +666,5 @@ Questa applicazione è uno strumento di **money management** e non garantisce pr
 
 Per bug, feature request o contributi, contatta il team di sviluppo.
 
-**Versione**: 1.0.0  
-**Ultimo Aggiornamento**: Febbraio 2026
+**Versione**: 1.1.0 (Feb 2026 Update)
+**Ultimo Aggiornamento**: 18 Febbraio 2026

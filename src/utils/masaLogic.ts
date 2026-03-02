@@ -1,8 +1,8 @@
 import { calculateMaxNetProfit, calculateMasaDenominator } from './mathUtils';
 import type { Config, MasaPlan } from '../types/masaniello';
 
-export const createInitialPlan = (config: Config, startCapital?: number): MasaPlan => {
-    const capital = startCapital !== undefined ? startCapital : config.initialCapital;
+export const createInitialPlan = (config: Config, startCapital?: number, persistentWeeklyTarget?: number, persistentWeeklyBaseline?: number): MasaPlan => {
+    const capital = startCapital !== undefined ? Math.ceil(startCapital) : Math.ceil(config.initialCapital);
     const maxProfit = calculateMaxNetProfit(
         capital,
         config.totalEvents,
@@ -15,7 +15,8 @@ export const createInitialPlan = (config: Config, startCapital?: number): MasaPl
         startCapital: capital,
         currentCapital: capital,
         targetCapital: capital + maxProfit,
-        currentWeeklyTarget: capital * (1 + (config.weeklyTargetPercentage || 0) / 100),
+        currentWeeklyTarget: persistentWeeklyTarget || (capital * (1 + (config.weeklyTargetPercentage || 0) / 100)),
+        startWeeklyBaseline: persistentWeeklyBaseline || capital,
         maxNetProfit: maxProfit,
         quota: config.quota,
         totalEvents: config.totalEvents,
@@ -40,7 +41,14 @@ export const createInitialPlan = (config: Config, startCapital?: number): MasaPl
         tags: [],
         role: config.role,
         feedForwardConfig: config.feedForwardConfig,
-        feedSource: config.feedSource
+        feedSource: config.feedSource,
+        elasticStretchesUsed: 0,
+        hierarchyType: config.hierarchyType || 'STANDALONE',
+        fatherPlanId: config.fatherPlanId || null,
+        fatherEventId: config.fatherEventId || null,
+        fatherStake: config.fatherStake,
+        fatherQuota: config.fatherQuota,
+        tradingCommission: config.tradingCommission
     };
 };
 
@@ -220,4 +228,209 @@ export const calculateTiltThreshold = (
     const structuralLosses = totalAllowedErrors - (remainingEvents - remainingWins);
     const remainingAllowedErrors = totalAllowedErrors - structuralLosses;
     return Math.max(2, Math.ceil(remainingAllowedErrors * 0.3));
+};
+
+/**
+ * Calculates the raw Masaniello Health Index (MHI) and its components.
+ * Returns the full analysis regardless of urgency thresholds.
+ */
+export const calculateMasanielloHealth = (
+    plan: {
+        startCapital: number;
+        currentCapital: number;
+        targetCapital: number;
+        quota: number;
+        totalEvents: number;
+        expectedWins: number;
+        remainingEvents: number;
+        remainingWins: number;
+        isRescued: boolean;
+        maxConsecutiveLosses?: number;
+        currentConsecutiveLosses?: number;
+    },
+    overrideQuota?: number,
+    overrideStake?: number
+) => {
+    const effectiveQuota = overrideQuota || plan.quota;
+    const eventsPlayed = plan.totalEvents - plan.remainingEvents;
+    const progress = plan.totalEvents > 0 ? eventsPlayed / plan.totalEvents : 0;
+
+    const m = plan.maxConsecutiveLosses || 0;
+    const cl = plan.currentConsecutiveLosses || 0;
+
+    const nextStake = overrideStake !== undefined
+        ? overrideStake
+        : calculateStake(
+            plan.currentCapital, plan.remainingEvents, plan.remainingWins,
+            effectiveQuota, plan.targetCapital, m, cl
+        );
+
+    // Vectors
+    const stakeRatio = plan.currentCapital > 0 ? nextStake / plan.currentCapital : 0;
+
+    // Compute baseline ratio from the original configuration to understand what "normal" exposure is for this specific plan
+    const initialStake = calculateStake(
+        plan.startCapital, plan.totalEvents, plan.expectedWins,
+        plan.quota, plan.targetCapital, m, 0
+    );
+    const baselineRatio = plan.startCapital > 0 ? initialStake / plan.startCapital : 0.15;
+
+    // Set a tolerance threshold that is at least 15%, but scales with aggressive configurations
+    const toleranceThreshold = Math.max(0.15, baselineRatio * 1.25);
+
+    let stakeScore = 0;
+    if (stakeRatio > toleranceThreshold) {
+        // Calculate penalty based on the excess over the specific tolerance
+        const excess = stakeRatio - toleranceThreshold;
+        stakeScore = Math.min(50, Math.pow(excess * 3.5, 1.5) * 40);
+        if (isNaN(stakeScore)) stakeScore = excess * 100;
+        stakeScore = Math.min(stakeScore, 50);
+    }
+
+    let clScore = 0;
+    if (m > 0 && cl > 0) {
+        const proximity = cl / m;
+        clScore = Math.pow(proximity, 3) * 30;
+    }
+
+    let runwayScore = 0;
+    if (nextStake > 1) {
+        const runway = plan.currentCapital / nextStake;
+        if (runway < 2.5) {
+            runwayScore = Math.min(20, (2.5 - runway) * 10);
+        }
+    }
+
+    let deviationScore = 0;
+    const winsAchieved = plan.expectedWins - plan.remainingWins;
+    const expectedWinsByNow = progress * plan.expectedWins;
+    const winDeficit = expectedWinsByNow - winsAchieved;
+    if (winDeficit > 0.5) {
+        deviationScore = Math.min(winDeficit * 10, 20);
+    }
+
+    const totalScore = stakeScore + clScore + runwayScore + deviationScore;
+    const isEmergency = stakeRatio > Math.max(0.35, toleranceThreshold * 1.5);
+
+    return {
+        score: Math.min(100, Math.round(totalScore)),
+        vectors: { stakeScore, clScore, runwayScore, deviationScore },
+        isEmergency,
+        progress
+    };
+};
+
+export const getRescueAdvisory = (
+    plan: {
+        startCapital: number;
+        currentCapital: number;
+        targetCapital: number;
+        quota: number;
+        totalEvents: number;
+        expectedWins: number;
+        remainingEvents: number;
+        remainingWins: number;
+        isRescued: boolean;
+        maxConsecutiveLosses?: number;
+        currentConsecutiveLosses?: number;
+    } | null,
+    overrideQuota?: number,
+    overrideStake?: number,
+    customThresholds?: { warning: number; critical: number }
+): { urgency: 'warning' | 'critical'; score: number; reason: string } | null => {
+    if (!plan || plan.isRescued || plan.currentCapital >= plan.targetCapital - 0.01) return null;
+
+    // Immediate Critical triggers (Death Spiral) - Check first
+    const capitalRetention = plan.currentCapital / plan.startCapital;
+    if (capitalRetention < 0.40) {
+        return {
+            urgency: 'critical',
+            score: 90,
+            reason: `Capitale critico (${Math.round(capitalRetention * 100)}% residuo). Rischio rovina imminente.`
+        };
+    }
+
+    const health = calculateMasanielloHealth(plan, overrideQuota, overrideStake);
+
+    // Gates
+    if (health.progress < 0.15 && !health.isEmergency) return null;
+
+    // Thresholds
+    const warningThresh = customThresholds?.warning ?? 45;
+    const criticalThresh = customThresholds?.critical ?? 75;
+
+    let urgency: 'warning' | 'critical' | null = null;
+    if (health.score >= criticalThresh || health.isEmergency) urgency = 'critical';
+    else if (health.score >= warningThresh) urgency = 'warning';
+
+    if (!urgency) return null;
+
+    // Reasons
+    const reasons: string[] = [];
+
+    if (health.vectors.stakeScore > 25) reasons.push(`esposizione elevata`);
+    if (health.vectors.clScore > 10) reasons.push(`vicinanza Red Line`);
+    if (health.vectors.runwayScore > 10) reasons.push(`riserve scarse`);
+    if (health.vectors.deviationScore > 10) reasons.push(`trend negativo`);
+
+    if (reasons.length === 0) reasons.push(`stress sistemico`);
+
+    let reasonText = urgency === 'critical'
+        ? `Situazione insostenibile: ${reasons.join(', ')}. Attiva il Rescue.`
+        : `Rischio elevato: ${reasons.join(', ')}.`;
+
+    return { urgency, score: health.score, reason: reasonText };
+};
+
+export const lockProfitInPlan = (plan: MasaPlan, amount: number): MasaPlan => {
+    const isPlanStart = plan.events.filter(e => !e.isSystemLog).length === 0;
+    const newCapital = Math.round((plan.currentCapital - amount) * 100) / 100;
+    const newStartCapital = isPlanStart ? Math.round((plan.startCapital - amount) * 100) / 100 : plan.startCapital;
+
+    // Recalculate target based on new capital and remaining progress
+    const remainingProfit = calculateMaxNetProfit(
+        newCapital,
+        plan.remainingEvents,
+        plan.remainingWins,
+        plan.quota,
+        plan.maxConsecutiveLosses || 0
+    );
+    const newTarget = Math.round((newCapital + remainingProfit) * 100) / 100;
+
+    return {
+        ...plan,
+        currentCapital: newCapital,
+        startCapital: newStartCapital,
+        targetCapital: newTarget,
+        maxNetProfit: Math.round((newTarget - newStartCapital) * 100) / 100,
+        accumulatedAmount: Math.round(((plan.accumulatedAmount || 0) + amount) * 100) / 100,
+        events: [...plan.events, {
+            id: `system_lock_${Date.now()}`,
+            stake: 0,
+            isWin: false,
+            isVoid: false,
+            isPartialSequence: false,
+            isSystemLog: true,
+            message: `LOCKED PROFIT: €${amount}`,
+            capitalAfter: newCapital,
+            eventsLeft: plan.remainingEvents,
+            winsLeft: plan.remainingWins,
+            timestamp: new Date().toISOString(),
+            snapshot: {
+                config: {
+                    initialCapital: newStartCapital,
+                    quota: plan.quota,
+                    totalEvents: plan.totalEvents,
+                    expectedWins: plan.expectedWins,
+                    accumulationPercent: 50,
+                    weeklyTargetPercentage: 20,
+                    milestoneBankPercentage: 20
+                },
+                activeRules: [],
+                isRescued: plan.isRescued,
+                currentConsecutiveLosses: plan.currentConsecutiveLosses || 0,
+                targetCapital: newTarget
+            }
+        }]
+    };
 };

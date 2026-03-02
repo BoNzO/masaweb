@@ -1,51 +1,39 @@
 import React, { useState } from 'react';
-import { DollarSign, Plus, History, X } from 'lucide-react';
+import { DollarSign, History, X, Trash2 } from 'lucide-react';
 import type { CapitalPool } from '../types/masaniello';
 
 interface CapitalPoolManagerProps {
     pool: CapitalPool;
-    onAddCapital: (amount: number) => void;
     onSetAvailable: (amount: number) => void;
     onClose?: () => void;
+    onRemoveAllocation?: (masaId: string) => void;
 }
 
-const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapital, onSetAvailable, onClose }) => {
-    const [showAddForm, setShowAddForm] = useState(false);
-    const [amount, setAmount] = useState(1000);
+const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onSetAvailable, onClose, onRemoveAllocation }) => {
     const [showHistory, setShowHistory] = useState(false);
-    const [editingAvailable, setEditingAvailable] = useState(false);
-    const [availableValue, setAvailableValue] = useState(pool.totalAvailable);
+    const [editingTotal, setEditingTotal] = useState(false);
+    const totalAllocated = Object.values(pool.allocations).reduce((sum, val) => sum + val, 0);
+    const [totalValue, setTotalValue] = useState(pool.totalAvailable + totalAllocated);
 
-    const handleAdd = () => {
-        if (amount <= 0) {
-            alert('Inserisci un importo valido');
-            return;
-        }
-        onAddCapital(amount);
-        setShowAddForm(false);
-        setAmount(1000);
+    const handleEditTotal = () => {
+        setEditingTotal(true);
+        setTotalValue(pool.totalAvailable + totalAllocated);
     };
 
-    const handleEditAvailable = () => {
-        setEditingAvailable(true);
-        setAvailableValue(pool.totalAvailable);
-    };
-
-    const handleSaveAvailable = () => {
-        if (availableValue < 0) {
-            alert('Il capitale disponibile non può essere negativo');
+    const handleSaveTotal = () => {
+        const newAvailable = totalValue - totalAllocated;
+        if (newAvailable < 0) {
+            alert(`Il totale non può essere inferiore al capitale attualmente allocato (€${Math.ceil(totalAllocated)})`);
             return;
         }
-        onSetAvailable(availableValue);
-        setEditingAvailable(false);
+        onSetAvailable(newAvailable);
+        setEditingTotal(false);
     };
 
     const handleCancelEdit = () => {
-        setEditingAvailable(false);
-        setAvailableValue(pool.totalAvailable);
+        setEditingTotal(false);
+        setTotalValue(pool.totalAvailable + totalAllocated);
     };
-
-    const totalAllocated = Object.values(pool.allocations).reduce((sum, val) => sum + val, 0);
 
     return (
         <div className="card-body-redesign">
@@ -75,13 +63,6 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                        onClick={() => setShowAddForm(!showAddForm)}
-                        className="btn btn-primary"
-                    >
-                        <Plus size={16} />
-                        AGGIUNGI
-                    </button>
                     {onClose && (
                         <button
                             onClick={onClose}
@@ -105,29 +86,29 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
 
             {/* Stats Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-                {/* Disponibile (editable) */}
+                {/* Totale (editable) */}
                 <div
                     style={{
                         background: 'var(--bg-surface)',
                         border: '1px solid var(--border)',
                         borderRadius: 'var(--radius-md)',
                         padding: '14px 16px',
-                        cursor: editingAvailable ? 'default' : 'pointer',
+                        cursor: editingTotal ? 'default' : 'pointer',
                         transition: 'all var(--transition-base)'
                     }}
-                    onClick={!editingAvailable ? handleEditAvailable : undefined}
-                    onMouseEnter={(e) => !editingAvailable && (e.currentTarget.style.borderColor = 'var(--border-hover)')}
-                    onMouseLeave={(e) => !editingAvailable && (e.currentTarget.style.borderColor = 'var(--border)')}
+                    onClick={!editingTotal ? handleEditTotal : undefined}
+                    onMouseEnter={(e) => !editingTotal && (e.currentTarget.style.borderColor = 'var(--border-hover)')}
+                    onMouseLeave={(e) => !editingTotal && (e.currentTarget.style.borderColor = 'var(--border)')}
                 >
                     <div className="stat-label-redesign">
-                        Disponibile {!editingAvailable && <span style={{ fontSize: '9px', opacity: 0.5 }}>(click)</span>}
+                        Totale {!editingTotal && <span style={{ fontSize: '9px', opacity: 0.5 }}>(click)</span>}
                     </div>
-                    {editingAvailable ? (
+                    {editingTotal ? (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginTop: '6px' }}>
                             <input
                                 type="number"
-                                value={availableValue}
-                                onChange={(e) => setAvailableValue(Number(e.target.value))}
+                                value={totalValue}
+                                onChange={(e) => setTotalValue(Number(e.target.value))}
                                 className="font-mono"
                                 style={{
                                     width: '100px',
@@ -141,12 +122,12 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
                                 }}
                                 autoFocus
                                 onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleSaveAvailable();
+                                    if (e.key === 'Enter') handleSaveTotal();
                                     if (e.key === 'Escape') handleCancelEdit();
                                 }}
                             />
                             <button
-                                onClick={handleSaveAvailable}
+                                onClick={handleSaveTotal}
                                 style={{
                                     padding: '4px 8px',
                                     background: 'var(--accent-green)',
@@ -177,8 +158,8 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
                             </button>
                         </div>
                     ) : (
-                        <div className="stat-value-redesign" style={{ color: 'var(--accent-blue)', marginTop: '6px' }}>
-                            €{pool.totalAvailable.toFixed(2)}
+                        <div className="stat-value-redesign" style={{ color: 'var(--txt-primary)', marginTop: '6px' }}>
+                            €{Math.ceil(pool.totalAvailable + totalAllocated).toLocaleString('it-IT')}
                         </div>
                     )}
                 </div>
@@ -192,60 +173,23 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
                 }}>
                     <div className="stat-label-redesign">Allocato</div>
                     <div className="stat-value-redesign stat-value-pos" style={{ marginTop: '6px' }}>
-                        €{totalAllocated.toFixed(2)}
+                        €{Math.ceil(totalAllocated).toLocaleString('it-IT')}
                     </div>
                 </div>
 
-                {/* Totale */}
+                {/* Disponibile (read-only now) */}
                 <div style={{
                     background: 'var(--bg-surface)',
                     border: '1px solid var(--border)',
                     borderRadius: 'var(--radius-md)',
                     padding: '14px 16px'
                 }}>
-                    <div className="stat-label-redesign">Totale</div>
-                    <div className="stat-value-redesign" style={{ marginTop: '6px' }}>
-                        €{(pool.totalAvailable + totalAllocated).toFixed(2)}
+                    <div className="stat-label-redesign">Disponibile</div>
+                    <div className="stat-value-redesign" style={{ color: 'var(--accent-blue)', marginTop: '6px' }}>
+                        €{Math.ceil(pool.totalAvailable).toLocaleString('it-IT')}
                     </div>
                 </div>
             </div>
-
-            {/* Add Form */}
-            {showAddForm && (
-                <div style={{
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-md)',
-                    padding: '16px',
-                    marginBottom: '20px'
-                }}>
-                    <label className="stat-label-redesign" style={{ display: 'block', marginBottom: '8px' }}>
-                        Importo da Aggiungere (€)
-                    </label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                        <input
-                            type="number"
-                            value={amount}
-                            onChange={(e) => setAmount(Number(e.target.value))}
-                            min={1}
-                            step={100}
-                            className="font-mono"
-                            style={{
-                                flex: 1,
-                                padding: '8px 12px',
-                                background: 'var(--bg-elevated)',
-                                border: '1px solid var(--border)',
-                                borderRadius: 'var(--radius-sm)',
-                                color: 'var(--txt-primary)',
-                                fontSize: '14px'
-                            }}
-                        />
-                        <button onClick={handleAdd} className="btn btn-success">
-                            CONFERMA
-                        </button>
-                    </div>
-                </div>
-            )}
 
             {/* Allocations */}
             {Object.keys(pool.allocations).length > 0 && (
@@ -267,11 +211,26 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
                                     padding: '10px 14px'
                                 }}
                             >
-                                <span className="text-xs font-mono" style={{ color: 'var(--txt-secondary)', fontWeight: 600 }}>
-                                    {masaId.replace('_', ' #').toUpperCase()}
-                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    {onRemoveAllocation && (
+                                        <button
+                                            onClick={() => {
+                                                if (window.confirm("Sei sicuro di voler rimuovere questa allocazione? Il relativo Masaniello verrà chiuso e il capitale residuo verrà recuperato.")) {
+                                                    onRemoveAllocation(masaId);
+                                                }
+                                            }}
+                                            className="text-red-500/80 hover:text-red-400 p-1 cursor-pointer transition-colors"
+                                            title="Rimuovi Allocazione e Cancella Masaniello"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
+                                    <span className="text-xs font-mono" style={{ color: 'var(--txt-secondary)', fontWeight: 600 }}>
+                                        {masaId.replace('_', ' #').toUpperCase()}
+                                    </span>
+                                </div>
                                 <span className="font-mono stat-value-pos" style={{ fontSize: '14px' }}>
-                                    €{allocated.toFixed(2)}
+                                    €{Math.ceil(allocated).toLocaleString('it-IT')}
                                 </span>
                             </div>
                         ))}
@@ -317,8 +276,8 @@ const CapitalPoolManager: React.FC<CapitalPoolManagerProps> = ({ pool, onAddCapi
                                             tx.type === 'release' ? '↩ RILASCIO' :
                                                 '⇄ TRASFERIMENTO'}
                                     </span>
-                                    <span className="font-mono" style={{ fontSize: '13px', fontWeight: 700, color: 'var(--txt-primary)' }}>
-                                        €{tx.amount.toFixed(2)}
+                                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--txt-primary)' }}>
+                                        €{Math.ceil(tx.amount).toLocaleString('it-IT')}
                                     </span>
                                 </div>
                                 <p className="text-xs" style={{ color: 'var(--txt-secondary)', marginBottom: '4px' }}>

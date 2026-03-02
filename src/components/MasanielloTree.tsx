@@ -8,7 +8,6 @@ import {
     Network
 } from 'lucide-react';
 import type { MasaPlan } from '../types/masaniello';
-import { roundTwo } from '../utils/mathUtils';
 
 interface MasanielloTreeProps {
     plans: Record<string, MasaPlan>;
@@ -93,13 +92,13 @@ const MasanielloTree: React.FC<MasanielloTreeProps> = ({ plans, activePlanId, on
 
                     {/* Capital */}
                     <div className="text-xl font-black text-white mb-1 tracking-tight">
-                        €{roundTwo(plan.currentCapital).toFixed(2)}
+                        €{Math.ceil(plan.currentCapital).toLocaleString('it-IT')}
                     </div>
 
                     {/* Profit/Loss */}
                     <div className={`text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1 ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                        {isPositive ? '+' : ''}€{roundTwo(profit).toFixed(2)} ({roundTwo((profit / plan.startCapital) * 100).toFixed(1)}%)
+                        {isPositive ? '+' : ''}€{Math.ceil(Math.abs(profit)).toLocaleString('it-IT')} ({Math.ceil((profit / plan.startCapital) * 100)}%)
                     </div>
 
                     {/* Minimal Progress Bar */}

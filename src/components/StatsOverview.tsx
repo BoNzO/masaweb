@@ -42,14 +42,14 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
     };
     return (
         <div className="grid grid-cols-1 gap-4 mb-6">
-            <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="bg-[#0f1623] p-6 rounded-lg border border-slate-700 shadow-lg flex flex-col md:flex-row items-center justify-between gap-6">
                 <div className="flex-1">
                     <div className="text-slate-400 text-xs uppercase tracking-widest font-bold mb-1">
-                        Capitale Corrente (+ Accantonato)
+                        Capitale Corrente (Netto)
                     </div>
                     <div className="text-3xl font-medium text-green-400 flex items-baseline gap-2">
-                        €{totalWorth.toFixed(2)}
-                        <span className="text-sm text-slate-500 font-medium">/ €{startCapital.toFixed(2)}</span>
+                        €{Math.ceil(totalWorth - totalBanked).toLocaleString('it-IT')}
+                        <span className="text-sm text-slate-500 font-medium">/ €{Math.ceil(startCapital).toLocaleString('it-IT')}</span>
                     </div>
                     <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 uppercase tracking-tighter font-bold group/cap">
                         Su Cap. Iniziale:
@@ -74,7 +74,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                                 onClick={() => { setTempStart(absoluteStartCapital.toString()); setIsEditingStart(true); }}
                                 title="Clicca per modificare il capitale iniziale storico"
                             >
-                                €{absoluteStartCapital.toFixed(2)}
+                                €{Math.ceil(absoluteStartCapital).toLocaleString('it-IT')}
                             </span>
                         )}
                     </div>
@@ -89,22 +89,22 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                         Profitto Totale (+Accantonato)
                     </div>
                     <div className={`text-3xl font-medium ${totalProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {totalProfit >= 0 ? '+' : ''}€{totalProfit.toFixed(2)}
+                        {totalProfit >= 0 ? '+' : ''}€{Math.ceil(totalProfit).toLocaleString('it-IT')}
                     </div>
                     <div className="flex flex-col md:items-end mt-1">
                         <div className={`text-xs font-medium ${totalGrowth >= 0 ? 'text-green-400/80' : 'text-red-400/80'}`}>
-                            {totalGrowth >= 0 ? '+' : ''}{totalGrowth.toFixed(2)}%
+                            {totalGrowth >= 0 ? '+' : ''}{Math.ceil(totalGrowth)}%
                         </div>
                         <div className="text-[10px] text-slate-500 font-bold uppercase mt-1 flex flex-wrap md:justify-end gap-x-2">
-                            <span>Netto: <span className="text-slate-300">€{(totalProfit - totalBanked).toFixed(2)}</span></span>
+                            <span>Netto: <span className="text-slate-300">€{Math.ceil(totalProfit - totalBanked).toLocaleString('it-IT')}</span></span>
                             <span className="opacity-30">|</span>
-                            <span>Banked: <span className="text-yellow-500/80">€{totalBanked.toFixed(2)}</span></span>
+                            <span>Banked: <span className="text-yellow-500/80">€{Math.ceil(totalBanked).toLocaleString('it-IT')}</span></span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 shadow-lg relative overflow-hidden">
+            <div className="bg-[#0f1623] p-4 rounded-lg border border-slate-700 shadow-lg relative overflow-hidden">
                 <div className="flex flex-col h-full justify-between">
                     <div>
                         <div className="flex justify-between items-start mb-2">
@@ -112,7 +112,7 @@ const StatsOverview: React.FC<StatsOverviewProps> = ({
                                 <div className="text-slate-400 text-xs mb-1 flex items-center gap-1">
                                     <PiggyBank size={14} className="text-yellow-500" /> Accantonato
                                 </div>
-                                <div className="text-2xl font-bold text-yellow-500">€{totalBanked.toFixed(2)}</div>
+                                <div className="text-2xl font-bold text-yellow-500">€{Math.ceil(totalBanked).toLocaleString('it-IT')}</div>
                             </div>
                             <div className="text-right">
                                 <div className="text-slate-400 text-xs uppercase font-black mb-1">EV Analysis</div>

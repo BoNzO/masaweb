@@ -43,11 +43,11 @@ const CapitalCard: React.FC<CapitalCardProps> = ({ plan, bankedAmount = 0 }) => 
                         }}>
                             €
                         </span>
-                        {plan.currentCapital.toFixed(2)}
+                        {Math.ceil(plan.currentCapital).toLocaleString('it-IT')}
                     </div>
                     <div className="text-xs" style={{ color: 'var(--txt-muted)', marginTop: '8px' }}>
                         Su cap. iniziale: <strong style={{ color: 'var(--txt-primary)' }}>
-                            €{plan.startCapital.toFixed(2)}
+                            €{Math.ceil(plan.startCapital).toLocaleString('it-IT')}
                         </strong>
                     </div>
                     {growthPercent !== 0 && (
@@ -64,7 +64,7 @@ const CapitalCard: React.FC<CapitalCardProps> = ({ plan, bankedAmount = 0 }) => 
                             marginTop: '8px'
                         }} className="font-mono">
                             {isProfit ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                            {isProfit ? '+' : ''}{growthPercent.toFixed(2)}%
+                            {isProfit ? '+' : ''}{Math.ceil(growthPercent)}%
                         </div>
                     )}
                 </div>
@@ -80,17 +80,17 @@ const CapitalCard: React.FC<CapitalCardProps> = ({ plan, bankedAmount = 0 }) => 
                         color: totalProfit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
                         lineHeight: 1
                     }}>
-                        {totalProfit >= 0 ? '+' : ''}€{totalProfit.toFixed(2)}
+                        {totalProfit >= 0 ? '+' : ''}€{Math.ceil(totalProfit).toLocaleString('it-IT')}
                     </div>
                     <div className="text-xs" style={{ color: 'var(--txt-muted)', marginTop: '8px' }}>
                         Netto: <strong style={{ color: 'var(--txt-primary)' }}>
-                            €{profit.toFixed(2)}
+                            €{Math.ceil(profit).toLocaleString('it-IT')}
                         </strong>
                         {bankedAmount > 0 && (
                             <>
                                 {' · '}
                                 Banked: <strong style={{ color: 'var(--txt-muted)' }}>
-                                    €{bankedAmount.toFixed(2)}
+                                    €{Math.ceil(bankedAmount).toLocaleString('it-IT')}
                                 </strong>
                             </>
                         )}

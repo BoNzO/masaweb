@@ -144,7 +144,7 @@ const PlanStatsCard: React.FC<PlanStatsCardProps> = ({ plan }) => {
                         <div>
                             <div className="stat-label-redesign">Obiettivo</div>
                             <div className="font-mono" style={{ fontSize: '16px', fontWeight: 500, color: 'var(--accent-teal)' }}>
-                                €{plan.targetCapital.toFixed(2)}
+                                €{Math.ceil(plan.targetCapital).toLocaleString('it-IT')}
                             </div>
                         </div>
                     </div>

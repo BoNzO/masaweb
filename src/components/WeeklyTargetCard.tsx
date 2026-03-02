@@ -5,14 +5,16 @@ interface WeeklyTargetCardProps {
     plan: MasaPlan;
     config: Config;
     history: MasaPlan[];
+    totalTargetsReached?: number;
 }
 
-const WeeklyTargetCard: React.FC<WeeklyTargetCardProps> = ({ plan, config, history }) => {
+const WeeklyTargetCard: React.FC<WeeklyTargetCardProps> = ({ plan, config, history, totalTargetsReached }) => {
     const weeklyTargetPercentage = config.weeklyTargetPercentage || 0;
 
-    // Count targets reached in history and current plan
-    const historyReached = (history || []).reduce((sum, p) => sum + (p.weeklyTargetsReached || 0), 0);
-    const targetsReached = historyReached + (plan.weeklyTargetsReached || 0);
+    // Use persistence-aware counter if provided, otherwise fallback to calculation
+    const targetsReached = totalTargetsReached !== undefined
+        ? totalTargetsReached
+        : ((history || []).reduce((sum, p) => sum + (p.weeklyTargetsReached || 0), 0) + (plan.weeklyTargetsReached || 0));
 
     // Weekly target calculations
     // If we have a stored currentWeeklyTarget, use it. Otherwise calculate based on startCapital and percentage.
@@ -20,11 +22,16 @@ const WeeklyTargetCard: React.FC<WeeklyTargetCardProps> = ({ plan, config, histo
     const absoluteWeeklyTarget = plan.currentWeeklyTarget || (startCapital * (1 + weeklyTargetPercentage / 100));
 
     const currentCapital = plan.currentCapital;
+    const currentWeekHistory = (history || []).filter(p => p.startWeeklyBaseline === startCapital);
+
+    const bankedInHistory = currentWeekHistory.reduce((sum, p) => sum + (p.accumulatedAmount || 0), 0);
+    const fedInHistory = currentWeekHistory.reduce((sum, p) => sum + (p.fedAmount || 0), 0);
+
     const totalToGain = absoluteWeeklyTarget - startCapital;
-    const currentGain = currentCapital - startCapital;
+    const currentGain = (currentCapital + bankedInHistory + fedInHistory) - startCapital;
 
     const progress = totalToGain > 0 ? Math.max(0, Math.min(100, (currentGain / totalToGain) * 100)) : 0;
-    const missing = Math.max(0, absoluteWeeklyTarget - currentCapital);
+    const missing = Math.max(0, absoluteWeeklyTarget - (currentCapital + bankedInHistory + fedInHistory));
 
     // SVG Circle properties
     const radius = 35;
@@ -46,7 +53,7 @@ const WeeklyTargetCard: React.FC<WeeklyTargetCardProps> = ({ plan, config, histo
                     </span>
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--txt-muted)', fontWeight: 600 }}>
-                    +€{totalToGain.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} · {weeklyTargetPercentage}%
+                    +€{Math.ceil(totalToGain).toLocaleString('it-IT')} · {Math.ceil(weeklyTargetPercentage)}%
                 </div>
             </div>
 
@@ -89,7 +96,7 @@ const WeeklyTargetCard: React.FC<WeeklyTargetCardProps> = ({ plan, config, histo
                         justifyContent: 'center'
                     }}>
                         <span style={{ fontSize: '18px', fontWeight: 900, color: 'var(--txt-primary)', lineHeight: 1 }}>
-                            {Math.round(progress)}%
+                            {Math.ceil(progress)}%
                         </span>
                         <span style={{ fontSize: '10px', color: 'var(--txt-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
                             target
@@ -102,13 +109,13 @@ const WeeklyTargetCard: React.FC<WeeklyTargetCardProps> = ({ plan, config, histo
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                         <span style={{ fontSize: '11px', color: 'var(--txt-muted)', fontWeight: 500 }}>Mancante (Netto)</span>
                         <span style={{ fontSize: '13px', color: 'var(--txt-secondary)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                            €{missing.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                            €{Math.ceil(missing).toLocaleString('it-IT')}
                         </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                         <span style={{ fontSize: '11px', color: 'var(--txt-muted)', fontWeight: 500 }}>Target (Netto)</span>
                         <span style={{ fontSize: '14px', color: 'var(--txt-primary)', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>
-                            €{totalToGain.toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                            €{Math.ceil(totalToGain).toLocaleString('it-IT')}
                         </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>

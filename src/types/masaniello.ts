@@ -1,9 +1,18 @@
-export type PlanRole = 'standard' | 'master' | 'slave';
+export type PlanRole = 'standard' | 'master' | 'slave' | 'differential' | 'twin';
+export type PlanHierarchy = 'STANDALONE' | 'FATHER' | 'SON';
 
 export interface FeedForwardConfig {
   slavePlanId?: string;
   percentage: number;
   totalFed: number;
+}
+
+export interface ElasticConfig {
+  enabled: boolean;
+  triggerOnLosses: number;
+  addEvents: number;
+  addWins: number;
+  maxStretches: number;
 }
 
 export interface FeedSource {
@@ -25,6 +34,25 @@ export interface Config {
   role?: PlanRole;
   feedForwardConfig?: FeedForwardConfig;
   feedSource?: FeedSource;
+  elasticConfig?: ElasticConfig;
+  hierarchyType?: PlanHierarchy;
+  tradingCommission?: number;
+  fatherPlanId?: string | null;
+  fatherEventId?: string | null;
+  fatherStake?: number;
+  fatherQuota?: number;
+  twinConfig?: {
+    capitalLong: number;
+    capitalShort: number;
+    quotaLong?: number;
+    quotaShort?: number;
+    totalEventsLong?: number;
+    totalEventsShort?: number;
+    expectedWinsLong?: number;
+    expectedWinsShort?: number;
+  };
+  hedgeMultiplier?: number;
+  hedgeQuota?: number;
 }
 
 export interface EventDetail {
@@ -52,6 +80,10 @@ export interface MasaEvent {
   nyTimestamp?: string;
   snapshot?: EventSnapshot;
   feedAmount?: number; // Amount fed to slave or taken from buffer
+  linkedSonPlanId?: string | null;
+  isHierarchySummary?: boolean;
+  isHedge?: boolean;
+  note?: string;
 }
 
 export interface EventSnapshot {
@@ -60,7 +92,7 @@ export interface EventSnapshot {
   isRescued: boolean;
   currentConsecutiveLosses: number;
   maxConsecutiveLosses?: number;
-
+  elasticStretchesUsed?: number;
   suggestedStake?: number;
   targetCapital?: number;
 }
@@ -103,6 +135,16 @@ export interface MasaPlan {
   role?: PlanRole;
   feedForwardConfig?: FeedForwardConfig;
   feedSource?: FeedSource;
+  fedAmount?: number;
+  preRescueConfig?: Partial<Config>; // Stores original config before Rescue Mode modifications
+  elasticStretchesUsed: number;
+  elasticConfig?: ElasticConfig;
+  hierarchyType: PlanHierarchy;
+  tradingCommission?: number;
+  fatherPlanId?: string | null;
+  fatherEventId?: string | null;
+  fatherStake?: number;
+  fatherQuota?: number;
 }
 
 export interface ChartDataPoint {
@@ -129,16 +171,62 @@ export interface MasanielloInstance {
   currentPlan: MasaPlan | null;
   history: MasaPlan[];
   absoluteStartCapital: number;
+  globalWeeklyTargetsReached?: number; // Total targets reached across all plans of this instance
+  persistentWeeklyTarget?: number;    // Current target to beat
+  persistentWeeklyBaseline?: number;  // Capital baseline for current target
   createdAt: string;
   archivedAt?: string;
+  type?: 'standard' | 'differential' | 'twin';
+  differentialState?: {
+    planA: MasaPlan;
+    planB: MasaPlan;
+    status: 'active' | 'success_a' | 'success_b' | 'failed';
+    realCapital?: number;
+    history?: Array<{
+      id: string;
+      stakeA: number;
+      stakeB: number;
+      stakeDiff: number;
+      direction: 'LONG' | 'SHORT' | 'NEUTRAL';
+      outcome: 'WIN_A' | 'WIN_B' | 'LOSS_BOTH';
+      netProfit: number;
+      realCapitalAfter: number;
+      timestamp: string;
+      note?: string;
+    }>;
+  };
+  twinState?: {
+    planLong: MasaPlan;
+    planShort: MasaPlan;
+    historyLong?: MasaPlan[];
+    historyShort?: MasaPlan[];
+    activeSide: 'LONG' | 'SHORT' | null;
+    hedgeMultiplier?: number; // Default 0.2 (20% of main stake)
+    snapshots?: Array<{
+      timestamp: string;
+      side: 'LONG' | 'SHORT';
+      capitalLocked: number;
+    }>;
+  };
+  actionsQueue?: { type: string; payload: any }[];
+  sonsCompleted?: number;
+  sonsFailed?: number;
+  lastSonConfig?: Config;
+  missionResultQueued?: 'win' | 'loss' | null;
 }
 
 export interface CapitalPool {
   totalAvailable: number;
+  totalDeposited: number;
   allocations: {
     [masaId: string]: number; // Amount allocated to each Masaniello
   };
   history: CapitalPoolTransaction[];
+  lifetimeWins?: number;
+  lifetimeLosses?: number;
+  resetWinsOffset?: number;
+  resetLossesOffset?: number;
+  resetTargetsOffset?: number;
 }
 
 export interface CapitalPoolTransaction {
@@ -151,6 +239,15 @@ export interface CapitalPoolTransaction {
   description: string;
 }
 
+export interface StrategyTemplate {
+  id: string;
+  name: string;
+  config: Partial<Config>;
+  activeRules: string[];
+  type: 'standard' | 'differential' | 'twin';
+  isDefault?: boolean;
+}
+
 export interface MultiMasaState {
   instances: {
     [id: string]: MasanielloInstance;
@@ -159,6 +256,14 @@ export interface MultiMasaState {
   activeInstanceIds: string[]; // Max 3
   archivedInstanceIds: string[];
   currentViewId: string | null; // Currently selected tab
+  savedLogs?: Array<{
+    id: string;
+    instanceName: string;
+    instanceType: 'standard' | 'differential' | 'twin';
+    timestamp: string;
+    plan: MasaPlan;
+    // For differential/twin, we might want to store more, but MasaPlan is the core
+  }>;
 }
 
 export interface AggregatedStats {
@@ -170,5 +275,8 @@ export interface AggregatedStats {
   totalWins: number;
   totalLosses: number;
   totalWeeklyTargetsReached: number;
+  totalMasterCapital: number;
+  totalSlaveCapital: number;
+  totalDays: number;
   combinedChartData: ChartDataPoint[];
 }

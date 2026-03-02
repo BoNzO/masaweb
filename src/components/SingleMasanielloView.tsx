@@ -61,6 +61,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
         getNextStake,
         getRescueSuggestion,
         activateRescueMode,
+        activateElasticHorizon,
         updatePlanStartCapital,
         updateAbsoluteStartCapital,
         setHistory // Destructure setHistory
@@ -176,6 +177,19 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
 
     const rulesForActivePlan = React.useMemo(() => RULES.map(r => ({ ...r, id: r.id as any })), [RULES]);
 
+    // Locked capital in active Son missions
+    const lockedToSons = React.useMemo(() => {
+        return activeInstances.reduce((sum, inst) => {
+            if (inst.id !== instance.id &&
+                inst.currentPlan?.hierarchyType === 'SON' &&
+                inst.currentPlan?.fatherPlanId === instance.id &&
+                inst.status === 'active') {
+                return sum + (inst.currentPlan?.fatherStake || 0);
+            }
+            return sum;
+        }, 0);
+    }, [activeInstances, instance.id]);
+
     // Calculate stats
     const stats = React.useMemo(() => {
         const allPlans = [...history];
@@ -226,7 +240,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                 data.push({
                     name: `E${eventCounter}`,
                     capital: ev.capitalAfter,
-                    days: Number((eventCounter / 2.5).toFixed(1)), // Based on 2.5 trades/day
+                    days: Math.ceil(eventCounter / 2.5), // Based on 2.5 trades/day
                     cycle: plan.generationNumber
                 });
             });
@@ -253,7 +267,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
     if (instance.status === 'archived') {
         return (
             <div className="space-y-6">
-                <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 text-center">
+                <div className="bg-[#0f1623]/50 border border-slate-700 rounded-xl p-6 text-center">
                     <ArchiveIcon size={48} className="mx-auto mb-4 text-slate-500" />
                     <h3 className="text-xl font-bold text-slate-300 mb-2">Masaniello Archiviato</h3>
                     <p className="text-sm text-slate-400 mb-4">
@@ -283,7 +297,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
     return (
         <div className="space-y-6">
             {/* Header with Name Editing */}
-            <div className="flex items-center gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700/50">
+            <div className="flex items-center gap-4 bg-[#0f1623]/50 p-4 rounded-xl border border-slate-700/50">
                 {isEditingName ? (
                     <div className="flex items-center gap-2 flex-1">
                         <input
@@ -343,7 +357,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                                     CICLO COMPLETATO! <PartyPopper className="text-yellow-400" size={24} />
                                 </h3>
                                 <p className="text-emerald-100 font-medium opacity-90">
-                                    Complimenti! Hai chiuso la generazione con un profitto di <span className="font-black text-white text-lg">€{lastCycleProfit.toFixed(2)}</span>.
+                                    Complimenti! Hai chiuso la generazione con un profitto di <span className="font-black text-white text-lg">€{Math.ceil(lastCycleProfit).toLocaleString('it-IT')}</span>.
                                 </p>
                             </div>
                         </div>
@@ -490,7 +504,12 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
             {!showConfig && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Left Column */}
-                    <div className="space-y-6">
+                    <div className="space-y-6" style={{
+                        opacity: (currentPlan?.status !== 'active') ? 0.5 : 1,
+                        pointerEvents: (currentPlan?.status !== 'active') ? 'none' : 'auto',
+                        filter: (currentPlan?.status !== 'active') ? 'grayscale(0.3) brightness(0.9)' : 'none',
+                        transition: 'all 0.5s ease-in-out'
+                    }}>
                         <StatsOverview
                             totalWorth={stats.totalWorth}
                             startCapital={config.initialCapital}
@@ -539,9 +558,11 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                                 getRescueSuggestion={getRescueSuggestion}
                                 onUpdateStartCapital={updatePlanStartCapital}
                                 onUpdatePlan={setCurrentPlan}
+                                onActivateElastic={activateElasticHorizon}
                                 config={config}
                                 activeInstances={activeInstances}
                                 onSelectInstance={onSelectInstance}
+                                lockedToSons={lockedToSons}
                             />
                         )}
                     </div>
@@ -564,7 +585,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
 
             {/* Archived Instances List (Moved from Tabs) */}
             {archivedInstances.length > 0 && (
-                <div className="bg-slate-800/50 p-6 rounded-xl border border-slate-700/50 mt-8">
+                <div className="bg-[#0f1623]/50 p-6 rounded-xl border border-slate-700/50 mt-8">
                     <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                         <ArchiveIcon size={16} />
                         Masanielli Archiviati ({archivedInstances.length})
@@ -574,7 +595,7 @@ const SingleMasanielloView: React.FC<SingleMasanielloViewProps> = ({
                             <div
                                 key={archived.id}
                                 onClick={() => onSelectInstance(archived.id)}
-                                className="bg-slate-800 hover:bg-slate-700/80 p-4 rounded-lg border border-slate-700 transition-all text-left group relative cursor-pointer"
+                                className="bg-[#0f1623] hover:bg-slate-700/80 p-4 rounded-lg border border-slate-700 transition-all text-left group relative cursor-pointer"
                             >
                                 <div className="flex justify-between items-start mb-2">
                                     <div className="font-bold text-slate-300 group-hover:text-white transition-colors">

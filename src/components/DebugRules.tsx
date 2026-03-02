@@ -15,7 +15,7 @@ const DebugRules: React.FC<DebugRulesProps> = ({ plan, activeRules, config }) =>
         return (
             <button
                 onClick={() => setIsVisible(true)}
-                className="fixed bottom-4 right-4 z-50 bg-black/80 text-green-400 text-xs px-3 py-2 rounded-full border border-green-500 hover:bg-black font-mono"
+                className="fixed bottom-[5px] right-4 z-50 bg-black/80 text-green-400 text-xs px-3 py-2 rounded-full border border-green-500 hover:bg-black font-mono"
             >
                 🐞 DEBUG
             </button>

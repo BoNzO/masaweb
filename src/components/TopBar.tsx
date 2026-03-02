@@ -1,14 +1,15 @@
 import React from 'react';
-import { DollarSign } from 'lucide-react';
+import { DollarSign, RotateCcw } from 'lucide-react';
 import type { AggregatedStats } from '../types/masaniello';
 
 interface TopBarProps {
     stats: AggregatedStats;
     poolCapital: number;
     onTogglePool: () => void;
+    onResetGlobalStats: () => void;
 }
 
-const TopBar: React.FC<TopBarProps> = ({ stats, poolCapital, onTogglePool }) => {
+const TopBar: React.FC<TopBarProps> = ({ stats, poolCapital, onTogglePool, onResetGlobalStats }) => {
     return (
         <header className="topbar">
             {/* Logo */}
@@ -22,42 +23,58 @@ const TopBar: React.FC<TopBarProps> = ({ stats, poolCapital, onTogglePool }) => 
             {/* KPIs */}
             <div className="topbar-kpis">
                 <div className="kpi-pill">
-                    <div className="kpi-label">Initial Capital</div>
-                    <div className="kpi-value blue">€{stats.totalInitialCapital.toFixed(2)}</div>
+                    <div className="kpi-label">INITIAL</div>
+                    <div className="kpi-value" style={{ color: '#3b82f6' }}>€{Math.ceil(stats.totalInitialCapital).toLocaleString('it-IT')}</div>
                 </div>
                 <div className="kpi-pill">
-                    <div className="kpi-label">Total Worth</div>
-                    <div className="kpi-value neutral">€{stats.totalWorth.toFixed(2)}</div>
+                    <div className="kpi-label">MASTER</div>
+                    <div className="kpi-value" style={{ color: '#ffffff' }}>€{Math.ceil(stats.totalMasterCapital).toLocaleString('it-IT')}</div>
                 </div>
                 <div className="kpi-pill">
-                    <div className="kpi-label">Total Profit</div>
+                    <div className="kpi-label">SLAVE</div>
+                    <div className="kpi-value" style={{ color: '#ffffff' }}>€{Math.ceil(stats.totalSlaveCapital).toLocaleString('it-IT')}</div>
+                </div>
+                <div className="kpi-pill">
+                    <div className="kpi-label">BANKED</div>
+                    <div className="kpi-value gold">€{Math.ceil(stats.totalBanked).toLocaleString('it-IT')}</div>
+                </div>
+                <div className="kpi-pill">
+                    <div className="kpi-label">PROFIT</div>
                     <div className={`kpi-value ${stats.totalProfit >= 0 ? 'pos' : 'neg'}`}>
-                        {stats.totalProfit >= 0 ? '+' : ''}€{stats.totalProfit.toFixed(2)}
+                        {stats.totalProfit >= 0 ? '+' : ''}€{Math.ceil(stats.totalProfit).toLocaleString('it-IT')}
                     </div>
                 </div>
                 <div className="kpi-pill">
-                    <div className="kpi-label">Total Banked</div>
-                    <div className="kpi-value gold">€{stats.totalBanked.toFixed(2)}</div>
+                    <div className="kpi-label">TOTAL</div>
+                    <div className="kpi-value" style={{ color: '#3b82f6' }}>€{Math.ceil(stats.totalWorth).toLocaleString('it-IT')}</div>
                 </div>
                 <div className="kpi-pill">
-                    <div className="kpi-label">Total Capital</div>
-                    <div className="kpi-value accent">€{(stats.totalWorth + stats.totalBanked).toFixed(2)}</div>
-                </div>
-                <div className="kpi-pill">
-                    <div className="kpi-label">Target Raggiunti</div>
+                    <div className="kpi-label">TARGET</div>
                     <div className="kpi-value teal">{stats.totalWeeklyTargetsReached}</div>
                 </div>
                 <div className="kpi-pill">
-                    <div className="kpi-label">Pool</div>
-                    <div className="kpi-value gold">€{poolCapital.toFixed(2)}</div>
+                    <div className="kpi-label">POOL</div>
+                    <div className="kpi-value gold">€{Math.ceil(poolCapital).toLocaleString('it-IT')}</div>
                 </div>
             </div>
 
             {/* Actions */}
             <div className="topbar-actions">
-                <div className="badge-wins">
+                <div className="badge-wins" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span className="dot"></span>
-                    W{stats.totalWins} · L{stats.totalLosses} · {((stats.totalWins + stats.totalLosses) / 2.5).toFixed(1)} Days
+                    W{stats.totalWins} · L{stats.totalLosses} · {stats.totalDays} Days
+                    <button
+                        onClick={() => {
+                            if (window.confirm("Vuoi azzerare le statistiche globali (Win, Loss, Days)?")) {
+                                onResetGlobalStats();
+                            }
+                        }}
+                        className="text-emerald-500/80 hover:text-emerald-400 p-0 cursor-pointer transition-colors"
+                        title="Azzera Statistiche Globali"
+                        style={{ background: 'transparent', border: 'none', marginLeft: '4px', display: 'flex', alignItems: 'center' }}
+                    >
+                        <RotateCcw size={12} />
+                    </button>
                 </div>
                 <button className="btn btn-ghost" onClick={onTogglePool}>
                     <DollarSign size={14} />

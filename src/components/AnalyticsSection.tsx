@@ -18,8 +18,8 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] 
         return (
             <div className="bg-slate-800 border border-slate-600 p-2 rounded shadow-lg text-xs">
                 <p className="font-bold text-slate-200 mb-1">{payload[0].payload.name}</p>
-                <p className="text-slate-400">Giorno: {payload[0].payload.days}</p>
-                <p className="text-green-400">Capitale: €{payload[0].value.toFixed(2)}</p>
+                <p className="text-slate-400">Giorno: {Math.ceil(payload[0].payload.days)}</p>
+                <p className="text-green-400">Capitale: €{Math.ceil(payload[0].value).toLocaleString('it-IT')}</p>
             </div>
         );
     }
@@ -43,7 +43,7 @@ const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ chartData, heatmapD
                                 </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                            <XAxis dataKey="days" stroke="#94a3b8" fontSize={10} tickLine={false} tickFormatter={(value) => `${value}g`} />
+                            <XAxis dataKey="days" stroke="#94a3b8" fontSize={10} tickLine={false} tickFormatter={(value) => `${Math.ceil(value)}g`} />
                             <YAxis stroke="#94a3b8" fontSize={10} domain={['auto', 'auto']} />
                             <Tooltip content={<CustomTooltip />} />
                             <Area type="monotone" dataKey="capital" stroke="#4ade80" strokeWidth={2} fillOpacity={1} fill="url(#colorCapital)" />
@@ -54,7 +54,7 @@ const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ chartData, heatmapD
 
             <div className="bg-slate-800 p-6 rounded-lg border border-slate-700 shadow-lg overflow-hidden flex flex-col h-[300px] relative">
                 <h3 className="text-sm font-bold text-slate-300 mb-4 flex items-center gap-2">
-                    <Target size={16} className="text-blue-400" /> Target Weekly €{weeklyTarget.toFixed(2)} ({weeklyTargetPercentage}%)
+                    <Target size={16} className="text-blue-400" /> Target Weekly €{Math.ceil(weeklyTarget).toLocaleString('it-IT')} ({Math.ceil(weeklyTargetPercentage)}%)
                 </h3>
 
                 <div className="flex-1 flex flex-col items-center justify-center">
@@ -99,7 +99,7 @@ const AnalyticsSection: React.FC<AnalyticsSectionProps> = ({ chartData, heatmapD
                                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                                         <span className="text-3xl font-black text-white">{Math.round(progress)}%</span>
                                         <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                                            €{(absoluteWeeklyTarget - currentCapital).toFixed(2)} mancanti
+                                            €{Math.ceil(absoluteWeeklyTarget - currentCapital).toLocaleString('it-IT')} mancanti
                                         </span>
                                     </div>
                                 </div>

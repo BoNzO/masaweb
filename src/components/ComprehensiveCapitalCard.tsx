@@ -7,6 +7,7 @@ import type { MasaPlan } from '../types/masaniello';
 interface ComprehensiveCapitalCardProps {
     plan: MasaPlan;
     history: MasaPlan[];
+    lockedToSons?: number;
 }
 
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
@@ -16,7 +17,7 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] 
                 <p className="font-black text-slate-500 uppercase tracking-widest mb-2 border-b border-slate-700/50 pb-1">{payload[0].payload.name}</p>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ color: 'var(--txt-secondary)' }}>CAPITALE:</span>
-                    <span style={{ color: 'var(--accent-blue)', fontWeight: 800 }}>€{payload[0].value.toLocaleString('it-IT', { minimumFractionDigits: 2 })}</span>
+                    <span style={{ color: 'var(--accent-blue)', fontWeight: 800 }}>€{Math.ceil(payload[0].value).toLocaleString('it-IT')}</span>
                 </div>
             </div>
         );
@@ -26,11 +27,26 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] 
 
 const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
     plan,
-    history
+    history,
+    lockedToSons = 0
 }) => {
-    const profit = plan.currentCapital - plan.startCapital;
-    const isProfit = profit >= 0;
-    const growthPercent = plan.startCapital > 0 ? (profit / plan.startCapital) * 100 : 0;
+    const totalBanked = history.reduce((sum, p) => sum + (p.accumulatedAmount || 0), 0);
+    const instanceStartCapital = history.length > 0 ? history[0].startCapital : plan.startCapital;
+    // Calculate total perceived worth including the locked capital to prevent artificial drops in Father's profit
+    const totalWorth = plan.currentCapital + totalBanked + lockedToSons;
+    const totalInstanceProfit = totalWorth - instanceStartCapital;
+
+    const currentPlanProfit = (plan.currentCapital + lockedToSons) - plan.startCapital;
+    const isProfit = totalInstanceProfit >= 0;
+    const growthPercent = instanceStartCapital > 0 ? (totalInstanceProfit / instanceStartCapital) * 100 : 0;
+
+    const missionTargetProfit = (plan.fatherStake && plan.fatherQuota)
+        ? (plan.fatherStake * (plan.fatherQuota - 1))
+        : (plan.targetCapital - plan.startCapital);
+
+    const isHierarchy = plan.hierarchyType === 'SON';
+    const displayLeftProfit = isHierarchy ? totalInstanceProfit : currentPlanProfit;
+    const displayRightTarget = isHierarchy ? missionTargetProfit : (plan.targetCapital - plan.startCapital);
 
     // Calculate dynamic EV Index (Success Probability Ratio)
     const evIndex = React.useMemo(() => {
@@ -127,23 +143,40 @@ const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
                         CAPITALE CORRENTE
                     </div>
                     <div className="font-mono" style={{
-                        fontSize: '48px',
-                        fontWeight: 300,
-                        letterSpacing: '-2px',
-                        lineHeight: 1,
-                        color: 'var(--txt-primary)',
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: '12px',
                         marginBottom: '8px'
                     }}>
-                        <span style={{
-                            fontSize: '24px',
-                            verticalAlign: 'top',
-                            marginTop: '12px',
-                            display: 'inline-block',
-                            color: 'var(--txt-secondary)'
+                        <div style={{
+                            fontSize: '48px',
+                            fontWeight: 300,
+                            letterSpacing: '-2px',
+                            lineHeight: 1,
+                            color: 'var(--txt-primary)'
                         }}>
-                            €
-                        </span>
-                        {plan.currentCapital.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <span style={{
+                                fontSize: '24px',
+                                verticalAlign: 'top',
+                                color: 'var(--txt-secondary)'
+                            }}>
+                                €
+                            </span>
+                            {Math.ceil(plan.currentCapital).toLocaleString('it-IT')}
+                        </div>
+                        {lockedToSons > 0 && (
+                            <div className="text-orange-400" style={{
+                                fontSize: '28px',
+                                fontWeight: 400,
+                                letterSpacing: '-1px'
+                            }}>
+                                <span style={{ fontSize: '20px', verticalAlign: 'top', opacity: 0.8 }}>+€</span>
+                                {Math.ceil(lockedToSons).toLocaleString('it-IT')}
+                                <span className="text-[11px] font-bold uppercase tracking-widest opacity-80 ml-2" style={{ letterSpacing: '1px' }}>
+                                    Assegnati ai Figli
+                                </span>
+                            </div>
+                        )}
                     </div>
 
                     {growthPercent !== 0 && (
@@ -160,7 +193,7 @@ const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
                             marginTop: '10px'
                         }} className="font-mono">
                             {isProfit ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                            {isProfit ? '+' : ''}{growthPercent.toFixed(2)}%
+                            {isProfit ? '+' : ''}{Math.ceil(growthPercent)}%
                         </div>
                     )}
                 </div>
@@ -174,14 +207,14 @@ const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
                         fontSize: '48px',
                         fontWeight: 300,
                         letterSpacing: '-2px',
-                        color: profit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+                        color: totalInstanceProfit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
                         lineHeight: 1,
                         marginBottom: '8px'
                     }}>
-                        {profit >= 0 ? '+' : ''}€{profit.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {totalInstanceProfit >= 0 ? '+' : ''}€{Math.ceil(totalInstanceProfit).toLocaleString('it-IT')}
                     </div>
                     <div className="text-xs" style={{ color: 'var(--txt-muted)' }}>
-                        Performance Ciclo Corrente
+                        Performance Totale Missione
                     </div>
                 </div>
             </div>
@@ -205,7 +238,7 @@ const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
 
                 <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '0.8fr 0.8fr 0.8fr 0.8fr 2.1fr',
+                    gridTemplateColumns: plan.hierarchyType === 'SON' ? '0.7fr 0.7fr 0.7fr 0.7fr 1.6fr 1.6fr' : '0.8fr 0.8fr 0.8fr 0.8fr 2.1fr',
                     gap: '1px',
                     background: 'var(--border)',
                     borderRadius: 'var(--radius-md)',
@@ -251,7 +284,7 @@ const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
                         position: 'relative'
                     }}>
                         <div className="font-mono" style={{
-                            color: profit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+                            color: displayLeftProfit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
                             marginBottom: '4px',
                             display: 'flex',
                             alignItems: 'baseline',
@@ -259,18 +292,63 @@ const ComprehensiveCapitalCard: React.FC<ComprehensiveCapitalCardProps> = ({
                             gap: '2px'
                         }}>
                             <span style={{ fontSize: '24px', fontWeight: 700 }}>
-                                €{Math.floor(Math.abs(profit)).toLocaleString('it-IT')}
-                            </span>
-                            <span style={{ fontSize: '14px', opacity: 0.6 }}>
-                                ,{Math.round((Math.abs(profit) % 1) * 100).toString().padStart(2, '0')}
+                                €{Math.ceil(Math.abs(displayLeftProfit)).toLocaleString('it-IT')}
                             </span>
                             <span style={{ fontSize: '16px', opacity: 0.3, margin: '0 8px' }}>/</span>
-                            <span style={{ fontSize: '22px', color: 'var(--accent-green)', fontWeight: 800 }}>
-                                €{(plan.targetCapital - plan.startCapital).toLocaleString('it-IT', { minimumFractionDigits: 2 })}
+                            <span style={{ fontSize: '22px', color: displayRightTarget >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 800 }}>
+                                {displayRightTarget >= 0 ? '+' : ''}€{Math.ceil(Math.abs(displayRightTarget)).toLocaleString('it-IT')}
+                            </span>
+                            <span style={{
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                opacity: 0.6,
+                                marginLeft: '8px',
+                                background: displayLeftProfit >= 0 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                                color: displayLeftProfit >= 0 ? 'var(--accent-green)' : 'var(--accent-red)',
+                                padding: '2px 6px',
+                                borderRadius: '4px'
+                            }}>
+                                {Math.floor(Math.max(0, (displayLeftProfit / (displayRightTarget || 1)) * 100))}%
                             </span>
                         </div>
-                        <div className="stat-label-redesign" style={{ color: 'var(--accent-green)', opacity: 0.7 }}>TARGET PROFIT</div>
+                        <div className="stat-label-redesign" style={{ color: displayRightTarget >= 0 ? 'var(--accent-green)' : 'var(--accent-red)', opacity: 0.7 }}>
+                            {isHierarchy ? 'OBIETTIVO MISSIONE' : 'TARGET PIANO'}
+                        </div>
                     </div>
+
+                    {plan.hierarchyType === 'SON' && (
+                        <div style={{
+                            padding: '16px 0',
+                            textAlign: 'center',
+                            background: 'linear-gradient(to bottom, rgba(59,130,246,0.1), transparent)',
+                            position: 'relative'
+                        }}>
+                            <div className="font-mono" style={{
+                                color: 'var(--accent-blue)',
+                                marginBottom: '4px',
+                                display: 'flex',
+                                alignItems: 'baseline',
+                                justifyContent: 'center',
+                                gap: '4px'
+                            }}>
+                                <span style={{ fontSize: '24px', fontWeight: 800 }}>
+                                    {Math.floor(Math.max(0, (totalInstanceProfit / (
+                                        plan.fatherStake && plan.fatherQuota
+                                            ? Math.max(1, plan.fatherStake * (plan.fatherQuota - 1))
+                                            : Math.max(1, (plan.targetCapital || 1) - plan.startCapital)
+                                    )) * 100))}%
+                                </span>
+                            </div>
+                            <div className="stat-label-redesign" style={{ color: 'var(--accent-blue)', opacity: 0.8 }}>MISSIONE PADRE</div>
+                            <div style={{ fontSize: '9px', color: 'var(--txt-muted)', borderTop: '1px solid rgba(255,255,255,0.05)', marginTop: '4px', paddingTop: '4px' }}>
+                                TARGET: €{
+                                    plan.fatherStake && plan.fatherQuota
+                                        ? Math.ceil(plan.fatherStake * (plan.fatherQuota - 1)).toLocaleString('it-IT')
+                                        : Math.ceil((plan.targetCapital || 0) - plan.startCapital).toLocaleString('it-IT')
+                                } (UTILE)
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 

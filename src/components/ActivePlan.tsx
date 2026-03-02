@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
     AlertTriangle,
     LifeBuoy,
@@ -22,8 +22,8 @@ import {
     Link as LinkIcon
 } from 'lucide-react';
 import { generateCSV, downloadCSV } from '../utils/exportUtils';
-import type { MasaPlan, Rule } from '../types/masaniello';
-import { getEarlyClosureSuggestion, calculateTiltThreshold } from '../utils/masaLogic';
+import type { MasaPlan, Rule, MasanielloInstance } from '../types/masaniello';
+import { getEarlyClosureSuggestion, calculateTiltThreshold, getRescueAdvisory } from '../utils/masaLogic';
 import { calculateMaxNetProfit } from '../utils/mathUtils';
 import DebugRules from './DebugRules';
 
@@ -42,18 +42,14 @@ interface ActivePlanProps {
     onActivateRescue: (events: number, target?: number, wins?: number, extraCap?: number, maxLosses?: number) => void;
     onEarlyClose: () => void;
     getNextStake: (quota?: number) => number;
-    getRescueSuggestion: (extraCap?: number) => {
-        eventsToAdd: number;
-        winsToAdd: number;
-        targetCapital: number;
-        suggestedExtraCapital?: number;
-        estimatedStake: number;
-    } | null;
     onUpdatePlan: (newPlan: MasaPlan) => void;
     onUpdateStartCapital: (newAmount: number) => void;
-    config: { checklistTemplate?: string[] };
-    activeInstances?: any[];
+    config: { checklistTemplate?: string[]; elasticConfig?: any };
+    activeInstances?: MasanielloInstance[];
     onSelectInstance?: (id: string) => void;
+    onActivateElastic?: () => void;
+    lockedToSons?: number;
+    getRescueSuggestion?: () => any;
 }
 
 const ActivePlan: React.FC<ActivePlanProps> = ({
@@ -71,15 +67,15 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     onActivateRescue,
     onEarlyClose,
     getNextStake,
-    getRescueSuggestion,
     onUpdateStartCapital,
     config,
     activeInstances = [],
     onSelectInstance,
+    lockedToSons = 0
 }) => {
     const [rescueEventsToAdd, setRescueEventsToAdd] = useState(2);
     const [rescueWinsToAdd, setRescueWinsToAdd] = useState(0);
-    const [rescueMaxLosses, setRescueMaxLosses] = useState(currentPlan.maxConsecutiveLosses || 0);
+    const rescueMaxLosses = currentPlan.maxConsecutiveLosses || 0;
     const [showManualRescue, setShowManualRescue] = useState(false);
     const [rulesExpanded, setRulesExpanded] = useState(false);
     const [currentQuota, setCurrentQuota] = useState<number>(currentPlan.quota);
@@ -97,6 +93,11 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     const toggleChecklistItem = (item: string) => {
         setChecklist(prev => ({ ...prev, [item]: !prev[item] }));
     };
+
+    const isElasticTriggered = (currentPlan.elasticConfig?.enabled || config.elasticConfig?.enabled) &&
+        (currentPlan.currentConsecutiveLosses || 0) >= (currentPlan.elasticConfig?.triggerOnLosses || config.elasticConfig?.triggerOnLosses || 0) &&
+        (currentPlan.elasticStretchesUsed || 0) < (currentPlan.elasticConfig?.maxStretches || config.elasticConfig?.maxStretches || 0);
+
 
     const isChecklistComplete = (config.checklistTemplate || []).every(item => checklist[item]);
 
@@ -121,18 +122,40 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
         }
     };
 
-    const [rescueSuggestion, setRescueSuggestion] = useState<ReturnType<typeof getRescueSuggestion> | null>(null);
-    const [earlyClosure, setEarlyClosure] = useState<{ shouldClose: boolean; reason: string; profitSecure: number } | null>(null);
 
-    // Initial calculation
-    useEffect(() => {
-        // Check Rescue
-        const rescue = getRescueSuggestion(0);
-        setRescueSuggestion(rescue);
 
-        // Check Early Closure
-        const closure = getEarlyClosureSuggestion({ ...currentPlan, maxNetProfit: calculateMaxNetProfit(currentPlan.startCapital, currentPlan.totalEvents, currentPlan.expectedWins, currentPlan.quota, currentPlan.maxConsecutiveLosses || 0) });
-        setEarlyClosure(closure);
+    const [mhiThreshold] = useState<number>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('masa_mhi_threshold');
+            return saved ? parseInt(saved, 10) : 45;
+        }
+        return 45;
+    });
+
+    // Calculate effective stake for advisory consistency
+    const currentStake = getNextStake(currentQuota);
+
+
+    const rescueAdvisory = useMemo(() => {
+        return getRescueAdvisory(
+            currentPlan,
+            currentQuota,
+            currentStake,
+            { warning: mhiThreshold, critical: 75 }
+        );
+    }, [currentPlan, currentQuota, currentStake, mhiThreshold]);
+
+    const earlyClosure = useMemo(() => {
+        return getEarlyClosureSuggestion({
+            ...currentPlan,
+            maxNetProfit: calculateMaxNetProfit(
+                currentPlan.startCapital,
+                currentPlan.totalEvents,
+                currentPlan.expectedWins,
+                currentPlan.quota,
+                currentPlan.maxConsecutiveLosses || 0
+            )
+        });
     }, [currentPlan]);
 
     const eventsPlayed = currentPlan.totalEvents - currentPlan.remainingEvents;
@@ -148,7 +171,10 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     const isZombieState = currentPlan.remainingWins <= 0 && currentPlan.currentCapital < currentPlan.targetCapital - 0.01 && currentPlan.status === 'active';
 
     const isTargetReached = currentPlan.currentCapital > 0 && currentPlan.currentCapital >= currentPlan.targetCapital - 0.01;
-    const isRescueVisible = !isTargetReached && (showManualRescue || ((isCritical || isRescueNeededAfterWins) && !currentPlan.isRescued));
+
+    // To prevent Father plans from looking like they are in a massive loss when spawning sons,
+    // we logically add back the capital 'locked in sons' to the net current capital.
+    const netCurrentCapital = currentPlan.currentCapital + lockedToSons;
 
     // Failure Conditions
     const isCapitalExhausted = currentPlan.currentCapital < 0.05 && structuralLosses >= totalAllowedErrors;
@@ -157,7 +183,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
     const isFailed = isCapitalExhausted || isConsecutiveLimitReached;
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-4 px-[15px]">
             {/* PLAN FAILED BANNER */}
             {isFailed && (
                 <div className="bg-gradient-to-r from-red-950 to-black text-white p-6 rounded-xl shadow-2xl border-l-4 border-red-600 flex flex-col sm:flex-row items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
@@ -173,6 +199,39 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                     : "Capitale esaurito e scorta errori terminata."}
                             </div>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* RESCUE ADVISORY BANNER */}
+            {rescueAdvisory && !showManualRescue && (
+                <div className={`mb-6 border p-4 rounded-xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-500 ${rescueAdvisory.urgency === 'critical'
+                    ? 'bg-red-500/10 border-red-500/30'
+                    : 'bg-amber-500/10 border-amber-500/30'
+                    }`}>
+                    <div className={`p-2 rounded-full ${rescueAdvisory.urgency === 'critical' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                        }`}>
+                        {rescueAdvisory.urgency === 'critical' ? <LifeBuoy size={20} /> : <AlertTriangle size={20} />}
+                    </div>
+                    <div>
+                        <h4 className={`font-bold text-sm mb-1 uppercase tracking-wide ${rescueAdvisory.urgency === 'critical' ? 'text-red-400' : 'text-amber-400'
+                            }`}>
+                            {rescueAdvisory.urgency === 'critical' ? 'Rescue Consigliato' : 'Suggerimento Rescue'}
+                        </h4>
+                        <p className={`text-xs leading-relaxed mb-3 ${rescueAdvisory.urgency === 'critical' ? 'text-red-200/80' : 'text-amber-200/80'
+                            }`}>
+                            {rescueAdvisory.reason}
+                        </p>
+                        <button
+                            onClick={() => setShowManualRescue(true)}
+                            className={`px-4 py-2 rounded-lg text-xs font-black uppercase shadow-lg transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2 ${rescueAdvisory.urgency === 'critical'
+                                ? 'bg-red-500 hover:bg-red-400 text-red-950 shadow-red-500/20'
+                                : 'bg-amber-500 hover:bg-amber-400 text-amber-950 shadow-amber-500/20'
+                                }`}
+                        >
+                            <LifeBuoy size={14} />
+                            Apri Configurator
+                        </button>
                     </div>
                 </div>
             )}
@@ -226,199 +285,69 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
             )}
 
 
-            {/* ALERTS STACK */}
-            <div className="space-y-3 mb-6">
-                {/* Early Closure */}
-                {earlyClosure?.shouldClose && (
-                    <div className="bg-gradient-to-r from-emerald-600 to-green-700 text-white p-4 rounded-xl shadow-lg border-l-4 border-emerald-400 flex flex-col md:flex-row justify-between items-center gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-white/20 rounded-lg">
-                                <TrendingUp size={20} />
-                            </div>
-                            <div>
-                                <div className="font-black text-sm uppercase tracking-wider">Take Profit</div>
-                                <div className="text-xs text-emerald-100 opacity-90">{earlyClosure.reason}</div>
-                            </div>
-                        </div>
-                        <button onClick={onEarlyClose} className="bg-white text-emerald-800 px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md hover:bg-emerald-50 transition-colors">
-                            Chiudi (€{earlyClosure.profitSecure.toFixed(2)})
-                        </button>
-                    </div>
-                )}
-
-                {/* Rescue / Critical Logic */}
-                {isRescueVisible && (
-                    <div className="bg-gradient-to-r from-red-900 to-rose-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-red-500 flex flex-col gap-4 animate-in slide-in-from-top-2">
-                        {/* ... existing Rescue/Critical content ... */}
-                        {/* I'll use a placeholder and then fix it if it works, or better, just keep the content carefully */}
-                        <div className="flex justify-between items-start">
-                            <div className="flex items-start gap-3">
-                                <div className="p-2 bg-red-500/20 rounded-lg">
-                                    <AlertTriangle size={20} className="text-red-300" />
+            {/* UNIFIED ALERT DRAWER */}
+            <div className="mb-6">
+                {(isTargetReached || ((isCritical || isRescueNeededAfterWins || isElasticTriggered || (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold) && !currentPlan.isRescued) || earlyClosure?.shouldClose) && (
+                    <div className={`
+                        relative overflow-hidden p-4 rounded-xl shadow-lg border-l-4 animate-in slide-in-from-top-2 transition-all duration-300
+                        ${isTargetReached ? 'bg-emerald-500 border-emerald-300 text-emerald-950' :
+                            (isCritical || isRescueNeededAfterWins) ? 'bg-gradient-to-r from-red-900/90 to-rose-900/90 border-red-500 text-white' :
+                                isElasticTriggered ? 'bg-gradient-to-r from-indigo-900/90 to-slate-900/90 border-indigo-500 text-white' :
+                                    (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold ? 'bg-gradient-to-r from-orange-900/90 to-slate-900/90 border-orange-500 text-white' :
+                                        'bg-gradient-to-r from-emerald-900/90 to-slate-900/90 border-emerald-500 text-white'}
+                    `}>
+                        <div className="flex justify-between items-center gap-4">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-white/10 rounded-lg">
+                                    {isTargetReached ? <TrendingUp size={20} /> :
+                                        (isCritical || isRescueNeededAfterWins) ? <AlertTriangle size={20} /> :
+                                            isElasticTriggered ? <Shield size={20} /> :
+                                                (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold ? <ShieldAlert size={20} /> :
+                                                    <TrendingUp size={20} />}
                                 </div>
-                                <div>
-                                    <div className="font-black text-sm uppercase tracking-wider text-red-100">Rescue: Soglia Critica</div>
-                                    <div className="text-xs text-red-200 opacity-80 max-w-sm">
-                                        Rischio elevato. Consigliato intervento per correggere il tiro.
+                                <div className="cursor-pointer" onClick={() => !isTargetReached && setShowManualRescue(!showManualRescue)}>
+                                    <div className="font-black text-xs uppercase tracking-wider opacity-90">
+                                        {isTargetReached ? 'Obiettivo Raggiunto!' :
+                                            (isCritical || isRescueNeededAfterWins) ? 'Rescue: Soglia Critica' :
+                                                isElasticTriggered ? 'Elastic Horizon' :
+                                                    (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold ? 'Rescue: Anti-Tilt' :
+                                                        'Suggerimento Chiusura'}
+                                    </div>
+                                    <div className="text-xs opacity-80 max-w-sm leading-tight mt-0.5">
+                                        {isTargetReached ? 'Complimenti! Hai raggiunto il target profit.' :
+                                            (isCritical || isRescueNeededAfterWins) ? 'Rischio elevato. Consigliato intervento Rescue.' :
+                                                isElasticTriggered ? 'Rilevato Drawdown. Orrizzonte estendibile.' :
+                                                    (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold ? `${currentPlan.currentConsecutiveLosses} loss consecutivi. Attivare il Rescue?` :
+                                                        earlyClosure?.reason}
                                     </div>
                                 </div>
                             </div>
-                            <div className="flex gap-2">
-                                {rescueSuggestion && (
-                                    <button onClick={() => onActivateRescue(rescueSuggestion.eventsToAdd, rescueSuggestion.targetCapital, rescueSuggestion.winsToAdd, 0)} className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border border-red-400/30">
-                                        Rescue Auto (+{rescueSuggestion.winsToAdd}V)
+
+                            <div className="flex items-center gap-2">
+                                {isTargetReached || earlyClosure?.shouldClose ? (
+                                    <button
+                                        onClick={onEarlyClose}
+                                        className="bg-white text-emerald-800 px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md hover:bg-emerald-50 transition-colors whitespace-nowrap"
+                                    >
+                                        {isTargetReached ? 'INCASSA ORA' : `CHIUDI (€${Math.ceil(earlyClosure?.profitSecure || 0)})`}
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={() => setShowManualRescue(!showManualRescue)}
+                                        className="bg-white/10 hover:bg-white/20 p-2.5 rounded-lg transition-colors shadow-lg border border-white/10"
+                                    >
+                                        <LifeBuoy size={18} className={showManualRescue ? 'animate-spin-slow' : ''} />
                                     </button>
                                 )}
-                                <button
-                                    onClick={() => setShowManualRescue(!showManualRescue)}
-                                    className={`bg-slate-800 hover:bg-slate-700 px-3 py-2 rounded-lg text-xs font-bold shadow text-white border ${showManualRescue ? 'border-indigo-500 text-indigo-300' : 'border-slate-600'}`}
-                                >
-                                    {showManualRescue ? 'Chiudi Manuale' : 'Manuale...'}
-                                </button>
                             </div>
-                        </div>
-
-                        {showManualRescue && (
-                            <div className="bg-black/20 rounded-lg p-4 border border-white/10 animate-in fade-in slide-in-from-top-1 space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    {/* Events Selector */}
-                                    <div>
-                                        <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
-                                            <LifeBuoy size={12} /> Aggiungi Eventi:
-                                        </div>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {[1, 2, 3, 4, 5, 6, 8, 10].map((num) => (
-                                                <button
-                                                    key={num}
-                                                    onClick={() => setRescueEventsToAdd(num)}
-                                                    className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueEventsToAdd === num ? 'bg-white text-rose-900 scale-110 shadow-lg ring-2 ring-rose-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                                                >
-                                                    +{num}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    {/* Wins Selector */}
-                                    <div>
-                                        <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
-                                            <TrendingUp size={12} /> Aggiungi Vittorie:
-                                        </div>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {[0, 1, 2, 3, 4, 5].map((num) => (
-                                                <button
-                                                    key={num}
-                                                    onClick={() => setRescueWinsToAdd(num)}
-                                                    className={`w-8 h-8 rounded-lg text-xs font-bold flex items-center justify-center transition-all ${rescueWinsToAdd === num ? 'bg-emerald-400 text-emerald-950 scale-110 shadow-lg ring-2 ring-emerald-500/50' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                                                >
-                                                    +{num}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    {/* Max Losses Selector */}
-                                    <div>
-                                        <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 flex items-center gap-2">
-                                            <ShieldAlert size={12} /> Max Loss (M):
-                                        </div>
-                                        <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-lg border border-slate-700/50">
-                                            <button
-                                                onClick={() => setRescueMaxLosses(Math.max(0, rescueMaxLosses - 1))}
-                                                className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
-                                            >
-                                                -
-                                            </button>
-                                            <span className={`text-xs font-bold w-full text-center ${rescueMaxLosses === 0 ? 'text-slate-500' : 'text-orange-400'}`}>
-                                                {rescueMaxLosses === 0 ? '∞' : rescueMaxLosses}
-                                            </span>
-                                            <button
-                                                onClick={() => setRescueMaxLosses(rescueMaxLosses + 1)}
-                                                className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors"
-                                            >
-                                                +
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Projection Panel */}
-                                {(() => {
-                                    const newTotalEvents = currentPlan.remainingEvents + rescueEventsToAdd;
-                                    const newTotalWins = currentPlan.remainingWins + rescueWinsToAdd;
-                                    const projectedMaxProfit = calculateMaxNetProfit(
-                                        currentPlan.currentCapital,
-                                        newTotalEvents,
-                                        newTotalWins,
-                                        currentPlan.quota,
-                                        rescueMaxLosses
-                                    );
-                                    const projectedTarget = currentPlan.currentCapital + projectedMaxProfit;
-
-                                    return (
-                                        <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-700/50 flex flex-col gap-2">
-                                            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                                                <div className="flex gap-4 text-center sm:text-left">
-                                                    <div>
-                                                        <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Target</div>
-                                                        <div className="text-sm font-black text-blue-300">€{projectedTarget.toFixed(2)}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-[10px] text-slate-500 uppercase font-bold">Nuovo Utile</div>
-                                                        <div className="text-sm font-black text-emerald-400">+€{projectedMaxProfit.toFixed(2)}</div>
-                                                    </div>
-                                                </div>
-
-                                                <button
-                                                    onClick={() => {
-                                                        onActivateRescue(rescueEventsToAdd, projectedTarget, rescueWinsToAdd, 0, rescueMaxLosses);
-                                                        setShowManualRescue(false);
-                                                    }}
-                                                    className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-xs font-black uppercase tracking-wider shadow-lg transition-all active:scale-95"
-                                                >
-                                                    Applica Modifiche
-                                                </button>
-                                            </div>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Anti-Tilt (Only if Critical is NOT visible) */}
-                {!isRescueVisible && (currentPlan.currentConsecutiveLosses || 0) >= tiltThreshold && !currentPlan.isRescued && (
-                    <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 rounded-xl shadow-lg border-l-4 border-indigo-500 flex flex-col md:flex-row justify-between items-center gap-4">
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-indigo-500/20 rounded-lg">
-                                <ShieldAlert size={20} className="text-indigo-300" />
-                            </div>
-                            <div>
-                                <div className="font-black text-sm uppercase tracking-wider text-indigo-100 flex items-center gap-2">
-                                    Rescue: Anti-Tilt
-                                </div>
-                                <div className="text-xs text-indigo-200 opacity-80 max-w-sm">
-                                    {currentPlan.currentConsecutiveLosses} loss consecutivi. Attiva il Rescue Rapido.
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2">
-                            <button onClick={() => setShowManualRescue(true)} className="bg-slate-800 hover:bg-slate-700 text-indigo-200 px-4 py-2 rounded-lg text-xs font-bold uppercase shadow-md border border-indigo-500/30 transition-colors">
-                                Usa Rescue Anti-Tilt
-                            </button>
-                            <button onClick={() => onActivateRescue(1, currentPlan.targetCapital, 0, 0)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-black uppercase shadow-md transition-colors">
-                                Rescue Rapido (+1)
-                            </button>
                         </div>
                     </div>
                 )}
-
             </div>
 
 
             {/* 1. TOP SECTION: Header & Stats */}
-            <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden group">
+            <div className="bg-[#0f1623] p-6 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden group">
                 <div className="absolute -top-32 -right-32 w-64 h-64 bg-blue-500/10 blur-[80px] group-hover:bg-blue-500/20 transition-all duration-700 pointer-events-none" />
 
                 {/* Header Title */}
@@ -429,6 +358,11 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                             {currentPlan.isRescued && (
                                 <span className="text-[10px] bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-md px-2 py-0.5 font-bold tracking-wide uppercase flex items-center gap-1">
                                     <LifeBuoy size={10} /> Rescued
+                                </span>
+                            )}
+                            {(currentPlan.elasticStretchesUsed || 0) > 0 && (
+                                <span className="text-[10px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-md px-2 py-0.5 font-bold tracking-wide uppercase flex items-center gap-1 animate-pulse">
+                                    <Shield size={10} /> Elastic Active
                                 </span>
                             )}
                         </h2>
@@ -468,14 +402,14 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                         </div>
                                         <div className="text-xs font-bold text-yellow-200/80">
                                             Feeding {currentPlan.feedForwardConfig?.percentage}% profit to {
-                                                activeInstances.find((i: any) => i.id === currentPlan.feedForwardConfig?.slavePlanId)?.name || 'Slave'
+                                                activeInstances.find((i: MasanielloInstance) => i.id === currentPlan.feedForwardConfig?.slavePlanId)?.name || 'Slave'
                                             }
                                         </div>
                                     </div>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-[9px] font-black text-yellow-500 uppercase tracking-widest leading-none mb-1">Total Fed</div>
-                                    <div className="text-sm font-black text-white">€{currentPlan.feedForwardConfig?.totalFed?.toFixed(2)}</div>
+                                    <div className="text-sm font-black text-white">€{Math.ceil(currentPlan.feedForwardConfig?.totalFed || 0).toLocaleString('it-IT')}</div>
                                 </div>
                             </div>
                         )}
@@ -499,7 +433,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                 <div className="text-right">
                                     <div className="text-[9px] font-black text-purple-500 uppercase tracking-widest leading-none mb-1">Virtual Buffer</div>
                                     <div className={`text-sm font-black ${currentPlan.feedSource?.isPaused ? 'text-red-400' : 'text-white'}`}>
-                                        €{currentPlan.feedSource?.virtualBuffer?.toFixed(2)}
+                                        €{Math.ceil(currentPlan.feedSource?.virtualBuffer || 0).toLocaleString('it-IT')}
                                     </div>
                                 </div>
                             </div>
@@ -523,7 +457,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                     type="number"
                                     value={tempStartCapital}
                                     onChange={(e) => setTempStartCapital(e.target.value)}
-                                    className="w-20 bg-slate-800 text-white font-bold text-sm px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-blue-500"
+                                    className="w-20 bg-[#0f1623] text-white font-bold text-sm px-1 py-0.5 rounded border border-slate-600 focus:outline-none focus:border-blue-500"
                                     autoFocus
                                 />
                                 <button onClick={handleStartCapitalUpdate} className="text-emerald-400 hover:bg-emerald-500/10 p-1 rounded transition-colors"><CheckCircle size={14} /></button>
@@ -531,7 +465,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                             </div>
                         ) : (
                             <div className="text-xl font-bold text-slate-300 cursor-pointer hover:text-blue-300 transition-colors" onClick={() => { setTempStartCapital(currentPlan.startCapital.toString()); setIsEditingStart(true); }}>
-                                €{currentPlan.startCapital.toFixed(2)}
+                                €{Math.ceil(currentPlan.startCapital).toLocaleString('it-IT')}
                             </div>
                         )}
                     </div>
@@ -544,22 +478,31 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                         <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex justify-between items-center">
                             Capitale Attuale
                         </div>
-                        <div className="text-xl font-bold tracking-tight text-[#F84AA7]">
-                            €{currentPlan.currentCapital.toFixed(2)}
+                        <div className="flex items-baseline gap-1.5 flex-wrap mt-0.5">
+                            <div className="text-2xl font-black tracking-tight text-[#F84AA7]">
+                                €{Math.ceil(currentPlan.currentCapital).toLocaleString('it-IT')}
+                            </div>
+                            {lockedToSons > 0 && (
+                                <div className="text-orange-400 font-bold tracking-tight text-sm flex items-baseline">
+                                    <span style={{ fontSize: '10px', verticalAlign: 'top', opacity: 0.8 }}>+€</span>
+                                    {Math.ceil(lockedToSons).toLocaleString('it-IT')}
+                                    <span className="text-[8px] uppercase tracking-widest opacity-80 ml-1" style={{ letterSpacing: '0.5px' }}>Nei Figli</span>
+                                </div>
+                            )}
                         </div>
                     </div>
 
                     {/* Target Capital */}
                     <div className="bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-blue-500/20 transition-colors group/target">
                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1 group-hover/target:text-blue-400 transition-colors">Target Finale</div>
-                        <div className="text-xl font-bold text-blue-400 group-hover/target:text-blue-300 transition-colors">€{currentPlan.targetCapital.toFixed(2)}</div>
+                        <div className="text-xl font-bold text-blue-400 group-hover/target:text-blue-300 transition-colors">€{Math.ceil(currentPlan.targetCapital).toLocaleString('it-IT')}</div>
                     </div>
 
                     {/* Current Profit (New Card) */}
-                    <div className={`bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-slate-600/50 transition-colors group/profit ${(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? 'hover:border-green-500/30' : 'hover:border-red-500/30'}`}>
+                    <div className={`bg-slate-900/50 rounded-2xl p-4 border border-slate-700/50 flex flex-col justify-between hover:border-slate-600/50 transition-colors group/profit ${(netCurrentCapital - currentPlan.startCapital) >= 0 ? 'hover:border-green-500/30' : 'hover:border-red-500/30'}`}>
                         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Profitto Attuale</div>
-                        <div className={`text-xl font-bold ${(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {(currentPlan.currentCapital - currentPlan.startCapital) >= 0 ? '+' : ''}€{(currentPlan.currentCapital - currentPlan.startCapital).toFixed(2)}
+                        <div className={`text-xl font-bold ${(netCurrentCapital - currentPlan.startCapital) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {(netCurrentCapital - currentPlan.startCapital) >= 0 ? '+' : ''}€{Math.ceil(netCurrentCapital - currentPlan.startCapital).toLocaleString('it-IT')}
                         </div>
                     </div>
                 </div>
@@ -569,15 +512,15 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                         <span>Progresso</span>
                         <span>{currentPlan.targetCapital > currentPlan.startCapital
-                            ? Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100)).toFixed(1)
-                            : '0.0'}%</span>
+                            ? Math.ceil(((netCurrentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100)
+                            : 0}%</span>
                     </div>
                     <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700/30">
                         <div
                             className={`h-full transition-all duration-1000 ease-out ${currentPlan.currentCapital >= currentPlan.startCapital ? 'bg-gradient-to-r from-blue-500 to-emerald-400' : 'bg-rose-500'}`}
                             style={{
                                 width: `${currentPlan.targetCapital > currentPlan.startCapital
-                                    ? Math.max(0, Math.min(100, ((currentPlan.currentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100))
+                                    ? Math.max(0, Math.min(100, ((netCurrentCapital - currentPlan.startCapital) / (currentPlan.targetCapital - currentPlan.startCapital)) * 100))
                                     : 0}%`
                             }}
                         />
@@ -586,10 +529,10 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
             </div>
 
             {/* 5. RULES (Collapsible) */}
-            <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-4">
+            <div className="bg-[#0f1623] rounded-xl border border-slate-700 overflow-hidden mb-4">
                 <button
                     onClick={() => setRulesExpanded(!rulesExpanded)}
-                    className="w-full flex items-center justify-between px-5 py-4 bg-slate-800 hover:bg-slate-750 transition-colors"
+                    className="w-full flex items-center justify-between px-5 py-4 bg-[#0f1623] hover:bg-slate-750 transition-colors"
                 >
                     <div className="flex items-center gap-3">
                         <div className="p-1.5 rounded-lg bg-slate-700 text-slate-400">
@@ -621,7 +564,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                     <div
                                         key={rule.id}
                                         onClick={() => toggleRule(rule.id)}
-                                        className={`px-3 py-2 rounded-lg text-[10px] flex items-center justify-between cursor-pointer border transition-all ${status.isSuspended ? 'bg-orange-500/5 border-orange-500/20 opacity-80' : status.enabled ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-slate-800/50 border-slate-700 text-slate-500 opacity-50'}`}
+                                        className={`px-3 py-2 rounded-lg text-[10px] flex items-center justify-between cursor-pointer border transition-all ${status.isSuspended ? 'bg-orange-500/5 border-orange-500/20 opacity-80' : status.enabled ? 'bg-slate-700 border-slate-600 text-slate-200' : 'bg-[#0f1623]/50 border-slate-700 text-slate-500 opacity-50'}`}
                                     >
                                         <span className="font-bold">{rule.label}</span>
                                         {status.enabled && <CheckSquare size={12} className="text-green-500" />}
@@ -634,12 +577,19 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
             </div>
 
             {/* 2. STATS & CONDIZIONI GRID */}
-            <div className={`grid grid-cols-1 sm:grid-cols-3 ${(currentPlan.maxConsecutiveLosses || 0) > 0 ? 'lg:grid-cols-4' : ''} gap-4 relative z-10 mb-6`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10 mb-6 
+                ${(currentPlan.maxConsecutiveLosses || 0) > 0 ? 'xl:grid-cols-4' : ''} 
+                ${currentPlan.elasticConfig?.enabled ? '2xl:grid-cols-5' : ''}`}>
 
                 {/* Events */}
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
                     <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Eventi</div>
-                    <div className="text-lg font-black text-white">{eventsPlayed} <span className="text-xs text-slate-500 font-medium">/ {currentPlan.totalEvents}</span></div>
+                    <div className="text-lg font-black text-white">
+                        {eventsPlayed} <span className="text-xs text-slate-500 font-medium">/ {currentPlan.totalEvents}</span>
+                        {currentPlan.elasticStretchesUsed > 0 && (
+                            <span className="ml-2 text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded">+{currentPlan.elasticStretchesUsed * (currentPlan.elasticConfig?.addEvents || 0)}E</span>
+                        )}
+                    </div>
                     <div className="w-full h-1 bg-slate-700 rounded-full mt-2 overflow-hidden">
                         <div className="h-full bg-blue-500" style={{ width: `${(eventsPlayed / currentPlan.totalEvents) * 100}%` }} />
                     </div>
@@ -650,6 +600,9 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Vittorie</div>
                     <div className="text-lg font-black text-emerald-400">
                         {currentPlan.expectedWins - currentPlan.remainingWins} <span className="text-xs text-slate-500 font-medium">/ {currentPlan.expectedWins}</span>
+                        {currentPlan.elasticStretchesUsed > 0 && (
+                            <span className="ml-2 text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded">+{currentPlan.elasticStretchesUsed * (currentPlan.elasticConfig?.addWins || 0)}V</span>
+                        )}
                     </div>
                     <div className="w-full h-1 bg-slate-700 rounded-full mt-2 overflow-hidden">
                         <div className="h-full bg-emerald-500" style={{ width: `${((currentPlan.expectedWins - currentPlan.remainingWins) / currentPlan.expectedWins) * 100}%` }} />
@@ -663,7 +616,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                         {structuralLosses} <span className="text-xs text-slate-500 font-medium">/ {totalAllowedErrors}</span>
                     </div>
                     <div className="w-full h-1 bg-slate-700 rounded-full mt-2 overflow-hidden">
-                        <div className={`h-full ${isCritical ? 'bg-red-500' : 'bg-orange-400'}`} style={{ width: `${(structuralLosses / totalAllowedErrors) * 100}%` }} />
+                        <div className={`h-full ${isCritical ? 'bg-red-500' : 'bg-orange-400'}`} style={{ width: `${(structuralLosses / (totalAllowedErrors || 1)) * 100}%` }} />
                     </div>
                 </div>
 
@@ -696,12 +649,38 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                         </div>
                     </div>
                 )}
+
+                {/* Elastic Horizon Stretches (Conditional 5th Column) */}
+                {currentPlan.elasticConfig?.enabled && (
+                    <div className="bg-slate-900/50 p-3 rounded-xl border border-indigo-500/20 flex flex-col justify-between group/elastic">
+                        <div className="flex justify-between items-start mb-1">
+                            <div className="text-[9px] text-indigo-400 font-black uppercase tracking-widest">Elastic Stretches</div>
+                            <Shield size={10} className={`transition-colors ${currentPlan.elasticStretchesUsed > 0 ? 'text-indigo-400' : 'text-slate-600'}`} />
+                        </div>
+
+                        <div className={`text-lg font-black ${currentPlan.elasticStretchesUsed > 0 ? 'text-indigo-300' : 'text-slate-500'}`}>
+                            {currentPlan.elasticStretchesUsed || 0} <span className="text-xs text-slate-600 font-medium">/ {currentPlan.elasticConfig.maxStretches}</span>
+                        </div>
+
+                        <div className="flex gap-1 mt-2.5 items-center h-1">
+                            {Array.from({ length: currentPlan.elasticConfig.maxStretches }).map((_, idx) => (
+                                <div
+                                    key={idx}
+                                    className={`flex-1 h-1 rounded-full transition-all duration-500 ${idx < (currentPlan.elasticStretchesUsed || 0)
+                                        ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.6)] animate-pulse'
+                                        : 'bg-slate-800 border border-white/5'
+                                        }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* GATEKEEPER: PRE-TRADE CHECKLIST */}
             {
                 !isTargetReached && !isFailed && (
-                    <div className="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden">
+                    <div className="bg-[#0f1623] p-6 rounded-3xl border border-slate-700 shadow-xl relative overflow-hidden">
                         <div className="flex justify-between items-center mb-5">
                             <div className="flex items-center gap-3">
                                 <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
@@ -777,9 +756,17 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                     {/* Top Row: Next Step (Left) & Quota (Right) */}
                     <div className="flex items-start justify-between relative z-10 mb-8">
                         {/* Left: Next Step */}
-                        <div className="text-xs text-blue-100/70 font-bold uppercase tracking-widest flex items-center gap-2">
-                            <RefreshCw size={12} />
-                            Prossimo Step
+                        <div className="flex flex-col gap-1">
+                            <div className="text-xs text-blue-100/70 font-bold uppercase tracking-widest flex items-center gap-2">
+                                <RefreshCw size={12} />
+                                Prossimo Step
+                            </div>
+                            <button
+                                onClick={() => setShowManualRescue(!showManualRescue)}
+                                className={`text-[9px] font-black py-0.5 px-2 rounded border transition-all flex items-center gap-1 mt-1 ${showManualRescue ? 'bg-orange-500/30 border-orange-400 text-orange-200' : 'bg-white/10 border-white/20 text-white/60 hover:bg-white/20'}`}
+                            >
+                                <LifeBuoy size={10} className={showManualRescue ? 'animate-spin-slow' : ''} /> RESCUE
+                            </button>
                         </div>
 
                         {/* Right: Quota */}
@@ -797,6 +784,89 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
 
                     {/* Bottom Row: Stake */}
                     <div className="relative z-10">
+                        {showManualRescue && (
+                            <div className="bg-[#0f1623]/60 rounded-xl p-4 border border-white/10 animate-in fade-in slide-in-from-top-1 space-y-4 mb-4 backdrop-blur-md">
+                                <div className="flex items-center gap-2 mb-2 border-b border-white/5 pb-2">
+                                    <LifeBuoy size={14} className="text-orange-400" />
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-white">Rescue Configurator</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-4">
+                                    {/* Events Selector */}
+                                    <div>
+                                        <div className="text-[9px] font-bold uppercase text-slate-400 mb-2 flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5"><LifeBuoy size={10} /> + Eventi</div>
+                                            <span className="text-white bg-indigo-500/20 px-1.5 rounded">+{rescueEventsToAdd}</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                            {[1, 2, 3, 4, 5, 8].map((num) => (
+                                                <button
+                                                    key={num}
+                                                    onClick={() => setRescueEventsToAdd(num)}
+                                                    className={`w-7 h-7 rounded-lg text-[10px] font-bold flex items-center justify-center transition-all ${rescueEventsToAdd === num ? 'bg-white text-indigo-900 scale-105 shadow-lg' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                                                >
+                                                    +{num}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Wins Selector */}
+                                    <div>
+                                        <div className="text-[9px] font-bold uppercase text-slate-400 mb-2 flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5"><TrendingUp size={10} /> + Vittorie</div>
+                                            <span className="text-white bg-emerald-500/20 px-1.5 rounded">+{rescueWinsToAdd}</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                            {[0, 1, 2, 3].map((num) => (
+                                                <button
+                                                    key={num}
+                                                    onClick={() => setRescueWinsToAdd(num)}
+                                                    className={`w-7 h-7 rounded-lg text-[10px] font-bold flex items-center justify-center transition-all ${rescueWinsToAdd === num ? 'bg-emerald-400 text-emerald-950 scale-105 shadow-lg' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+                                                >
+                                                    +{num}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Projection Panel */}
+                                {(() => {
+                                    const newTotalEvents = currentPlan.remainingEvents + rescueEventsToAdd;
+                                    const newTotalWins = currentPlan.remainingWins + rescueWinsToAdd;
+                                    const projectedMaxProfit = calculateMaxNetProfit(
+                                        currentPlan.currentCapital,
+                                        newTotalEvents,
+                                        newTotalWins,
+                                        currentPlan.quota,
+                                        rescueMaxLosses
+                                    );
+                                    const projectedTarget = currentPlan.currentCapital + projectedMaxProfit;
+                                    const targetProfitVsStart = projectedTarget - currentPlan.startCapital;
+
+                                    return (
+                                        <div className="bg-black/20 rounded-lg p-2.5 border border-white/5 space-y-2">
+                                            <div className="flex justify-between items-center text-[10px]">
+                                                <span className="text-slate-400 uppercase font-black tracking-widest">Target Profit</span>
+                                                <span className={`font-black ${targetProfitVsStart >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                    {targetProfitVsStart >= 0 ? '+' : '-'}€{Math.ceil(Math.abs(targetProfitVsStart)).toLocaleString('it-IT')}
+                                                </span>
+                                            </div>
+
+                                            <button
+                                                onClick={() => {
+                                                    onActivateRescue(rescueEventsToAdd, projectedTarget, rescueWinsToAdd, 0, rescueMaxLosses);
+                                                    setShowManualRescue(false);
+                                                }}
+                                                className="w-full bg-indigo-500 hover:bg-indigo-400 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-wider shadow-lg transition-all active:scale-95"
+                                            >
+                                                Applica E Ricalcola
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+                        )}
                         <div className="text-sm font-medium text-blue-200 mb-1">
                             Puntata
                         </div>
@@ -851,7 +921,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                 onPartialWin(currentQuota, activePair, checklist);
                                 resetChecklist();
                             }}
-                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl"
+                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-[#0f1623] border-2 border-green-500/30 hover:border-green-500/50 rounded-2xl font-black text-lg shadow-xl"
                         >
                             <div className="flex flex-col items-center">
                                 <span className="flex items-center gap-2 text-green-400"><TrendingUp size={18} /> TESORETTO</span>
@@ -865,7 +935,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                                 onPartialLoss(currentQuota, activePair, checklist);
                                 resetChecklist();
                             }}
-                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-slate-800 border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl"
+                            className="group relative overflow-hidden py-4 bg-slate-900 hover:bg-[#0f1623] border-2 border-red-500/30 hover:border-red-500/50 rounded-2xl font-black text-lg shadow-xl"
                         >
                             <div className="flex flex-col items-center">
                                 <span className="flex items-center gap-1.5 text-red-500"><TrendingDown size={18} /> ERRORE</span>
@@ -881,9 +951,12 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
                 <h3 className="text-[10px] font-black text-indigo-400 border-b border-indigo-500/20 pb-2 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
                     <HistoryIcon size={14} /> Trading Dashboard (PRO)
                 </h3>
-                <div className="grid grid-cols-3 gap-3">
-                    <button onClick={onBreakEven} className="py-3 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl text-[10px] font-bold text-slate-300 flex items-center justify-center gap-2 transition-all">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <button onClick={onBreakEven} className="py-3 bg-[#0f1623] hover:bg-slate-700 border border-slate-600 rounded-xl text-[10px] font-bold text-slate-300 flex items-center justify-center gap-2 transition-all">
                         <Shield size={14} className="opacity-50" /> BREAK EVEN
+                    </button>
+                    <button onClick={() => setShowManualRescue(!showManualRescue)} className={`py-3 transition-all rounded-xl text-[10px] font-bold flex items-center justify-center gap-2 border ${showManualRescue ? 'bg-orange-500/20 border-orange-500/50 text-orange-400' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-300'}`}>
+                        <LifeBuoy size={14} className={showManualRescue ? 'animate-spin-slow' : 'opacity-50'} /> RESCUE MODE
                     </button>
                     <button onClick={() => {
                         const val = prompt("Profitto:", "0");
@@ -902,7 +975,7 @@ const ActivePlan: React.FC<ActivePlanProps> = ({
 
             {/* 8. EVENT LOG */}
             <div className="bg-slate-900/40 rounded-xl border border-slate-700/50 overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-700/50 bg-slate-800/50 flex justify-between items-center">
+                <div className="px-5 py-3 border-b border-slate-700/50 bg-[#0f1623]/50 flex justify-between items-center">
                     <h3 className="font-bold text-[10px] uppercase tracking-[0.2em] text-slate-400">Registro Eventi</h3>
                     <button
                         onClick={() => {

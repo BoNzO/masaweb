@@ -1,4 +1,4 @@
-export const roundTwo = (num: number | string) => Math.round((Number(num) + Number.EPSILON) * 100) / 100;
+export const roundTwo = (num: number | string) => Math.round(Number(num) * 100) / 100;
 
 export const nCr = (n: number, k: number): number => {
     if (k < 0 || k > n) return 0;
