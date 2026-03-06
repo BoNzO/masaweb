@@ -150,6 +150,15 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
     const previewTarget = effectiveCapital + previewProfit;
     const previewROI = effectiveCapital > 0 ? (previewProfit / effectiveCapital) * 100 : 0;
 
+    // Compound Interest Calculation
+    const compoundStages = config.compoundStages || 1;
+    let finalCompoundCapital = effectiveCapital;
+    if (compoundStages > 1 && effectiveCapital > 0) {
+        const multiplier = (previewProfit / effectiveCapital) + 1;
+        finalCompoundCapital = effectiveCapital * Math.pow(multiplier, compoundStages);
+    }
+    const finalCompoundProfit = finalCompoundCapital - effectiveCapital;
+
     const getSliderGradient = (val: number, color: string) => {
         return `linear-gradient(to right, ${color} 0%, ${color} ${val}%, #1e2329 ${val}%)`;
     };
@@ -544,9 +553,69 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                                                     onChange={(e) => setConfig({ ...config, tradingCommission: parseFloat(e.target.value) || 0 })}
                                                 />
                                             </div>
+                                            {/* RED LINE (MAX LOSSES) */}
+                                            <div className="relative group flex-1 mt-2">
+                                                <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 font-['DM_Mono'] text-[9px] text-[#ff4d6a] uppercase tracking-widest z-10 group-focus-within:text-[#ff4d6a] transition-colors">Red Line</div>
+                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-['DM_Mono'] text-[#ff4d6a]/60 text-sm group-focus-within:text-[#ff4d6a]">
+                                                    <RotateCcw size={12} />
+                                                </span>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="20"
+                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#ff4d6a]/50 focus:bg-[#ff4d6a]/5 transition-all outline-none rounded-xl pl-10 pr-4 py-3 font-['DM_Mono'] text-sm text-[#e8eaf0]"
+                                                    value={config.maxConsecutiveLosses || 0}
+                                                    onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) || 0 })}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
                                 )}
+
+                                {/* INTERESSE COMPOSTO (CICLI) */}
+                                <div className="col-span-full pt-6 border-t border-white/5">
+                                    <div className="group transition-colors rounded-xl bg-indigo-500/5 p-4 border border-indigo-500/10">
+                                        <div className="flex items-center justify-between gap-4 mb-4">
+                                            <div>
+                                                <div className="font-bold text-[11px] uppercase tracking-[0.15em] text-indigo-300">Cicli Interesse Composto</div>
+                                                <div className="text-[10px] text-indigo-400/60 leading-tight mt-1">Reinvestimento automatico dell'utile per missioni a lungo termine.</div>
+                                            </div>
+                                            <div className="font-['DM_Mono'] text-lg font-bold text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">
+                                                {config.compoundStages || 1}
+                                            </div>
+                                        </div>
+
+                                        <div className="mb-4">
+                                            <input
+                                                type="range"
+                                                min="1"
+                                                max="20"
+                                                step="1"
+                                                value={config.compoundStages || 1}
+                                                style={{
+                                                    accentColor: '#818cf8',
+                                                    background: getSliderGradient(((config.compoundStages || 1) - 1) / 19 * 100, '#818cf8')
+                                                }}
+                                                onChange={(e) => setConfig({ ...config, compoundStages: parseInt(e.target.value) || 1 })}
+                                                className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+                                            />
+                                        </div>
+
+                                        {compoundStages > 1 && (
+                                            <div className="flex items-center justify-between bg-black/20 rounded-xl p-4 border border-indigo-500/10 animate-in fade-in slide-in-from-top-2 duration-300">
+                                                <div className="text-center flex-1">
+                                                    <div className="text-[9px] uppercase tracking-widest text-[#5a6272] mb-1">Capitale Finale</div>
+                                                    <div className="text-sm font-bold text-white font-['DM_Mono']">€{Math.ceil(finalCompoundCapital).toLocaleString('it-IT')}</div>
+                                                </div>
+                                                <div className="w-px h-8 bg-indigo-500/10"></div>
+                                                <div className="text-center flex-1">
+                                                    <div className="text-[9px] uppercase tracking-widest text-[#5a6272] mb-1">Utile Totale</div>
+                                                    <div className="text-sm font-bold text-[#00f2c3] font-['DM_Mono']">+{Math.ceil((finalCompoundProfit / effectiveCapital) * 100)}%</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -642,7 +711,6 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                                                         accentColor: '#f59e0b',
                                                         background: getSliderGradient(config.milestoneBankPercentage, '#f59e0b')
                                                     }}
-                                                    onChange={(e) => setConfig({ ...config, milestoneBankPercentage: parseInt(e.target.value) || 0 })}
                                                     className="w-full h-1 rounded-full appearance-none cursor-pointer"
                                                 />
                                             </div>
@@ -661,41 +729,6 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                                     </div>
                                 )}
 
-                                {/* RED LINE */}
-                                <div className="group transition-colors hover:bg-[#181c21] relative">
-                                    <div className="px-6 py-4 flex items-center justify-between gap-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-1.5 bg-[#ff4d6a]/10 rounded-lg text-[#ff4d6a]">
-                                                <RotateCcw size={14} />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-[13px] text-[#e8eaf0]">Red Line</div>
-                                                <div className="text-[11px] text-[#ff4d6a]/70 font-medium">Max perdite consecutive — tolleranza</div>
-                                            </div>
-                                        </div>
-                                        <div className={`font-['DM_Mono'] text-sm font-bold min-w-[48px] text-right text-[#ff4d6a]`}>
-                                            {config.maxConsecutiveLosses || 0}
-                                        </div>
-                                    </div>
-                                    <div className="px-6 pb-6">
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="10"
-                                            step="1"
-                                            value={config.maxConsecutiveLosses || 0}
-                                            style={{
-                                                accentColor: '#ff4d6a',
-                                                background: getSliderGradient((config.maxConsecutiveLosses || 0) * 10, '#ff4d6a')
-                                            }}
-                                            onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) || 0 })}
-                                            className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                                        />
-                                    </div>
-                                    <div className="px-6 py-2 bg-black/5 border-t border-white/5 flex items-center gap-2 text-[#5a6272] text-[10px]">
-                                        <span className="text-[#00d4aa]">↳</span> Tolleranza: {config.maxConsecutiveLosses} rossi consecutivi prima dello stop.
-                                    </div>
-                                </div>
 
                                 {/* ELASTIC HORIZON */}
                                 <div className="group transition-colors hover:bg-[#181c21] relative">
@@ -1058,12 +1091,11 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                                 })}
                         </div>
                     </div>
-
                 </div>
-            </div >
+            </div>
 
             {/* COMPACT FLOATING SAVE BAR - ABSOLUTE */}
-            < div className="absolute bottom-[5px] left-1/2 -translate-x-1/2 w-auto min-w-[280px] max-w-[95%] z-[1000] animate-in fade-in slide-in-from-bottom-4 duration-500" >
+            <div className="absolute bottom-[5px] left-1/2 -translate-x-1/2 w-auto min-w-[280px] max-w-[95%] z-[1000] animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="bg-[#111823]/95 backdrop-blur-xl border border-white/10 rounded-full px-5 py-2 flex items-center justify-between shadow-[0_10px_40px_rgba(0,0,0,0.6)] ring-1 ring-white/5">
                     <div className="flex items-center gap-3 pr-4 border-r border-white/5">
                         <div className="relative">
@@ -1089,10 +1121,10 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
                         </button>
                     </div>
                 </div>
-            </div >
+            </div>
 
             {/* CUSTOM FONT INJECTION */}
-            < style dangerouslySetInnerHTML={{
+            <style dangerouslySetInnerHTML={{
                 __html: `
                 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;600;700;800&family=Inter:wght@300;400;500&display=swap');
                 
@@ -1112,15 +1144,13 @@ const ConfigurationPanel: React.FC<ConfigurationPanelProps> = ({
             `}} />
 
             {/* Simulator Overlay */}
-            {
-                showSimulator && (
-                    <MasaSimulator
-                        initialConfig={config}
-                        onClose={() => setShowSimulator(false)}
-                    />
-                )
-            }
-        </div >
+            {showSimulator && (
+                <MasaSimulator
+                    initialConfig={config}
+                    onClose={() => setShowSimulator(false)}
+                />
+            )}
+        </div>
     );
 };
 

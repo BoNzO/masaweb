@@ -53,6 +53,7 @@ export interface Config {
   };
   hedgeMultiplier?: number;
   hedgeQuota?: number;
+  compoundStages?: number;
 }
 
 export interface EventDetail {

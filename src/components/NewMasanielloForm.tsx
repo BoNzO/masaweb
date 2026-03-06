@@ -76,7 +76,8 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
             totalEventsShort: 10,
             expectedWinsLong: 7,
             expectedWinsShort: 7
-        }
+        },
+        compoundStages: 1
     });
 
     const [showSimulator, setShowSimulator] = useState(false);
@@ -195,6 +196,15 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
 
     const previewTarget = effectiveCapital + previewProfit;
     const previewROI = effectiveCapital > 0 ? (previewProfit / effectiveCapital) * 100 : 0;
+
+    // Compound Interest Calculation
+    const compoundStages = config.compoundStages || 1;
+    let finalCompoundCapital = effectiveCapital;
+    if (compoundStages > 1 && effectiveCapital > 0) {
+        const multiplier = (previewProfit / effectiveCapital) + 1;
+        finalCompoundCapital = effectiveCapital * Math.pow(multiplier, compoundStages);
+    }
+    const finalCompoundProfit = finalCompoundCapital - effectiveCapital;
 
     const getSliderGradient = (val: number, color: string) => {
         return `linear-gradient(to right, ${color} 0%, ${color} ${val}%, #1e2329 ${val}%)`;
@@ -400,731 +410,774 @@ const NewMasanielloForm: React.FC<NewMasanielloFormProps> = ({ poolCapital, onCr
                                 )}
                             </div>
                         </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* PARAMETRI BASE CARD */}
-                        <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors">
-                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
-                                <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-[#4f8ef7]/10 flex items-center justify-center text-[#4f8ef7] text-sm">
-                                        <Settings size={16} />
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* PARAMETRI BASE CARD */}
+                            <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors">
+                                <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                                    <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-[#4f8ef7]/10 flex items-center justify-center text-[#4f8ef7] text-sm">
+                                            <Settings size={16} />
+                                        </div>
+                                        Parametri Base
                                     </div>
-                                    Parametri Base
                                 </div>
-                            </div>
-                            <div className="p-6 space-y-6">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="col-span-full group">
-                                        {config.role === 'twin' ? (
-                                            <div className="space-y-4">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="text-[10px] uppercase tracking-wider text-[#5a6272]">Parametri Operativi</div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setIsAsymmetricTwin(!isAsymmetricTwin)}
-                                                        className={`text-[9px] px-2 py-1 rounded-md border flex items-center gap-2 transition-all ${isAsymmetricTwin ? 'bg-[#4f8ef7]/20 border-[#4f8ef7]/40 text-[#4f8ef7]' : 'bg-transparent border-white/10 text-[#5a6272]'}`}
-                                                    >
-                                                        <Shuffle size={10} />
-                                                        {isAsymmetricTwin ? 'ASIMMETRIA ATTIVA' : 'SINC. AUTOMATICA'}
-                                                    </button>
-                                                </div>
-
-                                                <div className="flex gap-4">
-                                                    {/* LONG SETTINGS */}
-                                                    <div className="flex-1 space-y-4 p-4 rounded-2xl bg-blue-500/5 border border-blue-500/10">
-                                                        <div className="text-[9px] font-black uppercase tracking-widest text-blue-400/60 pb-2 border-b border-blue-500/10 flex items-center justify-between">
-                                                            GEMELLO LONG
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
-                                                        </div>
-
-                                                        <div className="group">
-                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block group-focus-within:text-blue-400 transition-colors">Capitale Iniziale (€)</label>
-                                                            <input
-                                                                type="number"
-                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 focus:bg-blue-400/5 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                value={Math.ceil(config.twinConfig?.capitalLong || 0)}
-                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, capitalLong: Math.ceil(parseFloat(e.target.value) || 0) } })}
-                                                                min={100}
-                                                            />
-                                                        </div>
-
-                                                        {isAsymmetricTwin && (
-                                                            <>
-                                                                <div className="grid grid-cols-2 gap-3">
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Quota @</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            step="0.01"
-                                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                            value={config.twinConfig?.quotaLong || config.quota}
-                                                                            onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, quotaLong: parseFloat(e.target.value) || 1.01 } })}
-                                                                        />
-                                                                    </div>
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Resa %</label>
-                                                                        <div className="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-blue-400/60 font-mono">
-                                                                            {Math.ceil(((config.twinConfig?.quotaLong || config.quota) - 1) * 100)}%
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-
-                                                                <div className="grid grid-cols-2 gap-3">
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Eventi</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                            value={config.twinConfig?.totalEventsLong || config.totalEvents}
-                                                                            onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, totalEventsLong: parseInt(e.target.value) || 0 } })}
-                                                                        />
-                                                                    </div>
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Vittorie</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                            value={config.twinConfig?.expectedWinsLong || config.expectedWins}
-                                                                            onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, expectedWinsLong: parseInt(e.target.value) || 0 } })}
-                                                                        />
-                                                                    </div>
-                                                                </div>
-                                                            </>
-                                                        )}
+                                <div className="p-6 space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="col-span-full group">
+                                            {config.role === 'twin' ? (
+                                                <div className="space-y-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="text-[10px] uppercase tracking-wider text-[#5a6272]">Parametri Operativi</div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setIsAsymmetricTwin(!isAsymmetricTwin)}
+                                                            className={`text-[9px] px-2 py-1 rounded-md border flex items-center gap-2 transition-all ${isAsymmetricTwin ? 'bg-[#4f8ef7]/20 border-[#4f8ef7]/40 text-[#4f8ef7]' : 'bg-transparent border-white/10 text-[#5a6272]'}`}
+                                                        >
+                                                            <Shuffle size={10} />
+                                                            {isAsymmetricTwin ? 'ASIMMETRIA ATTIVA' : 'SINC. AUTOMATICA'}
+                                                        </button>
                                                     </div>
 
-                                                    {/* SHORT SETTINGS */}
-                                                    <div className="flex-1 space-y-4 p-4 rounded-2xl bg-purple-500/5 border border-purple-500/10">
-                                                        <div className="text-[9px] font-black uppercase tracking-widest text-purple-400/60 pb-2 border-b border-purple-500/10 flex items-center justify-between">
-                                                            GEMELLO SHORT
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
-                                                        </div>
+                                                    <div className="flex gap-4">
+                                                        {/* LONG SETTINGS */}
+                                                        <div className="flex-1 space-y-4 p-4 rounded-2xl bg-blue-500/5 border border-blue-500/10">
+                                                            <div className="text-[9px] font-black uppercase tracking-widest text-blue-400/60 pb-2 border-b border-blue-500/10 flex items-center justify-between">
+                                                                GEMELLO LONG
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
+                                                            </div>
 
-                                                        <div className="group">
-                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block group-focus-within:text-purple-400 transition-colors">Capitale Iniziale (€)</label>
-                                                            <input
-                                                                type="number"
-                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 focus:bg-purple-400/5 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                value={Math.ceil(config.twinConfig?.capitalShort || 0)}
-                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, capitalShort: Math.ceil(parseFloat(e.target.value) || 0) } })}
-                                                                min={100}
-                                                            />
-                                                        </div>
+                                                            <div className="group">
+                                                                <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block group-focus-within:text-blue-400 transition-colors">Capitale Iniziale (€)</label>
+                                                                <input
+                                                                    type="number"
+                                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 focus:bg-blue-400/5 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                    value={Math.ceil(config.twinConfig?.capitalLong || 0)}
+                                                                    onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, capitalLong: Math.ceil(parseFloat(e.target.value) || 0) } })}
+                                                                    min={100}
+                                                                />
+                                                            </div>
 
-                                                        {isAsymmetricTwin && (
-                                                            <>
-                                                                <div className="grid grid-cols-2 gap-3">
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Quota @</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            step="0.01"
-                                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                            value={config.twinConfig?.quotaShort || config.quota}
-                                                                            onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, quotaShort: parseFloat(e.target.value) || 1.01 } })}
-                                                                        />
-                                                                    </div>
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Resa %</label>
-                                                                        <div className="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-purple-400/60 font-mono">
-                                                                            {Math.ceil(((config.twinConfig?.quotaShort || config.quota) - 1) * 100)}%
+                                                            {isAsymmetricTwin && (
+                                                                <>
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Quota @</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                                value={config.twinConfig?.quotaLong || config.quota}
+                                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, quotaLong: parseFloat(e.target.value) || 1.01 } })}
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Resa %</label>
+                                                                            <div className="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-blue-400/60 font-mono">
+                                                                                {Math.ceil(((config.twinConfig?.quotaLong || config.quota) - 1) * 100)}%
+                                                                            </div>
                                                                         </div>
                                                                     </div>
-                                                                </div>
 
-                                                                <div className="grid grid-cols-2 gap-3">
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Eventi</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                            value={config.twinConfig?.totalEventsShort || config.totalEvents}
-                                                                            onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, totalEventsShort: parseInt(e.target.value) || 0 } })}
-                                                                        />
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Eventi</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                                value={config.twinConfig?.totalEventsLong || config.totalEvents}
+                                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, totalEventsLong: parseInt(e.target.value) || 0 } })}
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Vittorie</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-blue-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                                value={config.twinConfig?.expectedWinsLong || config.expectedWins}
+                                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, expectedWinsLong: parseInt(e.target.value) || 0 } })}
+                                                                            />
+                                                                        </div>
                                                                     </div>
-                                                                    <div>
-                                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Vittorie</label>
-                                                                        <input
-                                                                            type="number"
-                                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
-                                                                            value={config.twinConfig?.expectedWinsShort || config.expectedWins}
-                                                                            onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, expectedWinsShort: parseInt(e.target.value) || 0 } })}
-                                                                        />
+                                                                </>
+                                                            )}
+                                                        </div>
+
+                                                        {/* SHORT SETTINGS */}
+                                                        <div className="flex-1 space-y-4 p-4 rounded-2xl bg-purple-500/5 border border-purple-500/10">
+                                                            <div className="text-[9px] font-black uppercase tracking-widest text-purple-400/60 pb-2 border-b border-purple-500/10 flex items-center justify-between">
+                                                                GEMELLO SHORT
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
+                                                            </div>
+
+                                                            <div className="group">
+                                                                <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block group-focus-within:text-purple-400 transition-colors">Capitale Iniziale (€)</label>
+                                                                <input
+                                                                    type="number"
+                                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 focus:bg-purple-400/5 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                    value={Math.ceil(config.twinConfig?.capitalShort || 0)}
+                                                                    onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, capitalShort: Math.ceil(parseFloat(e.target.value) || 0) } })}
+                                                                    min={100}
+                                                                />
+                                                            </div>
+
+                                                            {isAsymmetricTwin && (
+                                                                <>
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Quota @</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                                value={config.twinConfig?.quotaShort || config.quota}
+                                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, quotaShort: parseFloat(e.target.value) || 1.01 } })}
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Resa %</label>
+                                                                            <div className="w-full bg-black/20 border border-white/5 rounded-xl px-3 py-2 text-xs text-purple-400/60 font-mono">
+                                                                                {Math.ceil(((config.twinConfig?.quotaShort || config.quota) - 1) * 100)}%
+                                                                            </div>
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            </>
-                                                        )}
+
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Eventi</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                                value={config.twinConfig?.totalEventsShort || config.totalEvents}
+                                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, totalEventsShort: parseInt(e.target.value) || 0 } })}
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Vittorie</label>
+                                                                            <input
+                                                                                type="number"
+                                                                                className="w-full bg-[#1e2329] border border-white/5 focus:border-purple-400/50 transition-all outline-none rounded-xl px-3 py-2 text-xs text-[#e8eaf0]"
+                                                                                value={config.twinConfig?.expectedWinsShort || config.expectedWins}
+                                                                                onChange={(e) => setConfig({ ...config, twinConfig: { ...config.twinConfig!, expectedWinsShort: parseInt(e.target.value) || 0 } })}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        ) : (
+                                            ) : (
+                                                <>
+                                                    <label className="text-[10px] uppercase tracking-wider text-[#5a6272] mb-1.5 block group-focus-within:text-[#00d4aa] transition-colors">Capitale Iniziale (€)</label>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
+                                                        value={Math.ceil(config.initialCapital)}
+                                                        onChange={(e) => setConfig({ ...config, initialCapital: Math.ceil(parseFloat(e.target.value) || 0) })}
+                                                        min={config.role === 'slave' ? 0 : 100}
+                                                        disabled={false}
+                                                    />
+                                                </>
+                                            )}
+                                            {config.role === 'slave' && (
+                                                <div className="mt-3 p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
+                                                    <div className="text-[9px] uppercase tracking-[0.2em] text-indigo-400/60 mb-1">Source (Feed from Master)</div>
+                                                    <div className="text-sm font-bold text-indigo-300">
+                                                        Piano Slave gestito tramite feed esterno
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {!isAsymmetricTwin && (
                                             <>
-                                                <label className="text-[10px] uppercase tracking-wider text-[#5a6272] mb-1.5 block group-focus-within:text-[#00d4aa] transition-colors">Capitale Iniziale (€)</label>
-                                                <input
-                                                    type="number"
-                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
-                                                    value={Math.ceil(config.initialCapital)}
-                                                    onChange={(e) => setConfig({ ...config, initialCapital: Math.ceil(parseFloat(e.target.value) || 0) })}
-                                                    min={config.role === 'slave' ? 0 : 100}
-                                                    disabled={false}
-                                                />
-                                            </>
-                                        )}
-                                        {config.role === 'slave' && (
-                                            <div className="mt-3 p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
-                                                <div className="text-[9px] uppercase tracking-[0.2em] text-indigo-400/60 mb-1">Source (Feed from Master)</div>
-                                                <div className="text-sm font-bold text-indigo-300">
-                                                    Piano Slave gestito tramite feed esterno
+                                                <div>
+                                                    <label className="text-[10px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Eventi Totali</label>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-[#4f8ef7]/50 focus:bg-[#4f8ef7]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
+                                                        value={config.totalEvents}
+                                                        onChange={(e) => setConfig({ ...config, totalEvents: parseInt(e.target.value) || 0 })}
+                                                    />
                                                 </div>
-                                            </div>
+                                                <div>
+                                                    <label className="text-[10px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Vittorie Attese</label>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-[#4f8ef7]/50 focus:bg-[#4f8ef7]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
+                                                        value={config.expectedWins}
+                                                        onChange={(e) => setConfig({ ...config, expectedWins: parseInt(e.target.value) || 0 })}
+                                                    />
+                                                </div>
+                                            </>
                                         )}
                                     </div>
 
                                     {!isAsymmetricTwin && (
-                                        <>
-                                            <div>
-                                                <label className="text-[10px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Eventi Totali</label>
+                                        <div>
+                                            <div className="flex gap-4 w-full">
+                                                {/* RISK REWARD INPUT */}
+                                                <div className="relative group flex-1 mt-2">
+                                                    <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 text-[9px] text-[#5a6272] uppercase tracking-widest z-10 group-focus-within:text-[#00d4aa] transition-colors">Risk:Reward</div>
+                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#5a6272] text-sm group-focus-within:text-[#00d4aa]">1 :</span>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0.01"
+                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl pl-10 pr-4 py-3 text-sm text-[#e8eaf0]"
+                                                        value={parseFloat((config.quota - 1).toFixed(2))}
+                                                        onChange={(e) => {
+                                                            const q = (parseFloat(e.target.value) || 0) + 1;
+                                                            setConfig({ ...config, quota: q });
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="relative group flex-1 mt-2">
+                                                    <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 text-[9px] text-[#5a6272] uppercase tracking-widest z-10 group-focus-within:text-[#00d4aa] transition-colors">Quota</div>
+                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#5a6272] text-sm group-focus-within:text-[#00d4aa]">@</span>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="1.01"
+                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl pl-8 pr-4 py-3 text-sm text-[#e8eaf0]"
+                                                        value={parseFloat(config.quota.toFixed(2))}
+                                                        onChange={(e) => {
+                                                            const q = parseFloat(e.target.value) || 1.01;
+                                                            setConfig({ ...config, quota: q });
+                                                        }}
+                                                    />
+                                                </div>
+                                                {/* COMMISSION INPUT */}
+                                                <div className="relative group flex-1 mt-2">
+                                                    <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 text-[9px] text-[#5a6272] uppercase tracking-widest z-10 group-focus-within:text-[#00d4aa] transition-colors">Comm. (%)</div>
+                                                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#5a6272] text-[10px] group-focus-within:text-[#00d4aa]">%</span>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0"
+                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
+                                                        value={config.tradingCommission || 0}
+                                                        onChange={(e) => setConfig({ ...config, tradingCommission: parseFloat(e.target.value) || 0 })}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* INTERESSE COMPOSTO (CICLI) */}
+                                    <div className="mt-6 pt-6 border-t border-white/5">
+                                        <div className="group transition-colors rounded-xl bg-indigo-500/5 p-4 border border-indigo-500/10">
+                                            <div className="flex items-center justify-between gap-4 mb-4">
+                                                <div>
+                                                    <div className="font-bold text-[11px] uppercase tracking-[0.15em] text-indigo-300">Cicli Interesse Composto</div>
+                                                    <div className="text-[10px] text-indigo-400/60 leading-tight mt-1">Reinvestimento automatico dell'utile per missioni a lungo termine.</div>
+                                                </div>
+                                                <div className="font-['DM_Mono'] text-lg font-bold text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">
+                                                    {config.compoundStages || 1}
+                                                </div>
+                                            </div>
+
+                                            <div className="mb-4">
                                                 <input
-                                                    type="number"
-                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#4f8ef7]/50 focus:bg-[#4f8ef7]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
-                                                    value={config.totalEvents}
-                                                    onChange={(e) => setConfig({ ...config, totalEvents: parseInt(e.target.value) || 0 })}
+                                                    type="range"
+                                                    min="1"
+                                                    max="20"
+                                                    step="1"
+                                                    value={config.compoundStages || 1}
+                                                    style={{
+                                                        accentColor: '#818cf8',
+                                                        background: getSliderGradient(((config.compoundStages || 1) - 1) / 19 * 100, '#818cf8')
+                                                    }}
+                                                    onChange={(e) => setConfig({ ...config, compoundStages: parseInt(e.target.value) || 1 })}
+                                                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
                                                 />
                                             </div>
-                                            <div>
-                                                <label className="text-[10px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Vittorie Attese</label>
-                                                <input
-                                                    type="number"
-                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#4f8ef7]/50 focus:bg-[#4f8ef7]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
-                                                    value={config.expectedWins}
-                                                    onChange={(e) => setConfig({ ...config, expectedWins: parseInt(e.target.value) || 0 })}
-                                                />
+
+                                            {compoundStages > 1 && (
+                                                <div className="flex items-center justify-between bg-black/20 rounded-xl p-4 border border-indigo-500/10 animate-in fade-in slide-in-from-top-2 duration-300">
+                                                    <div className="text-center flex-1">
+                                                        <div className="text-[9px] uppercase tracking-widest text-slate-500 mb-1">Capitale Finale</div>
+                                                        <div className="text-sm font-bold text-white">€{Math.ceil(finalCompoundCapital).toLocaleString('it-IT')}</div>
+                                                    </div>
+                                                    <div className="w-px h-8 bg-indigo-500/10"></div>
+                                                    <div className="text-center flex-1">
+                                                        <div className="text-[9px] uppercase tracking-widest text-slate-500 mb-1">Utile Totale</div>
+                                                        <div className="text-sm font-bold text-[#00f2c3]">+{Math.ceil((finalCompoundProfit / effectiveCapital) * 100)}%</div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* BANKING & CRESCITA CARD */}
+                            <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors flex flex-col">
+                                <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                                    <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-[#00d4aa]/10 flex items-center justify-center text-[#00d4aa] text-sm">
+                                            <TrendingUp size={16} />
+                                        </div>
+                                        Banking & Crescita
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 divide-y divide-white/5">
+                                    {config.role !== 'slave' && config.role !== 'twin' && (
+                                        <>
+                                            {/* TARGET SETTIMANALE */}
+                                            <div className="group transition-colors hover:bg-[#181c21]">
+                                                <div className="px-6 py-4 flex items-center justify-between gap-4">
+                                                    <div>
+                                                        <div className="font-medium text-[13px] text-[#e8eaf0]">Target Settimanale</div>
+                                                        <div className="text-[11px] text-[#5a6272]">Obiettivo di crescita — +€{Math.ceil((config.weeklyTargetPercentage / 100) * effectiveCapital).toLocaleString('it-IT')}</div>
+                                                    </div>
+                                                    <div className={`text-sm font-bold min-w-[48px] text-right ${config.weeklyTargetPercentage > 0 ? 'text-[#00d4aa]' : 'text-[#5a6272]'}`}>
+                                                        {Math.ceil(config.weeklyTargetPercentage)}%
+                                                    </div>
+                                                </div>
+                                                <div className="px-6 pb-6">
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="100"
+                                                        step="0.1"
+                                                        value={config.weeklyTargetPercentage}
+                                                        style={{
+                                                            accentColor: '#00d4aa',
+                                                            background: getSliderGradient(config.weeklyTargetPercentage, '#00d4aa')
+                                                        }}
+                                                        onChange={(e) => setConfig({ ...config, weeklyTargetPercentage: parseFloat(e.target.value) || 0 })}
+                                                        className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* BANKING TARGET */}
+                                            <div className="group transition-colors hover:bg-[#181c21]">
+                                                <div className="px-6 py-4 flex items-center justify-between gap-4">
+                                                    <div>
+                                                        <div className="font-medium text-[13px] text-[#e8eaf0]">Banking Target Sett.</div>
+                                                        <div className="text-[11px] text-[#5a6272]">Accantonamento post-chiusura ciclo</div>
+                                                    </div>
+                                                    <div className={`text-sm font-bold min-w-[48px] text-right ${config.accumulationPercent > 0 ? 'text-[#00d4aa]' : 'text-[#5a6272]'}`}>
+                                                        {config.accumulationPercent}%
+                                                    </div>
+                                                </div>
+                                                <div className="px-6 pb-6">
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="50"
+                                                        step="5"
+                                                        value={config.accumulationPercent}
+                                                        style={{
+                                                            accentColor: '#00d4aa',
+                                                            background: getSliderGradient((config.accumulationPercent / 50) * 100, '#00d4aa')
+                                                        }}
+                                                        onChange={(e) => setConfig({ ...config, accumulationPercent: parseInt(e.target.value) || 0 })}
+                                                        className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* BANKING PROGRESSIVO */}
+                                            <div className="group transition-colors hover:bg-[#181c21]">
+                                                <div className="px-6 py-4 flex items-center justify-between gap-4">
+                                                    <div>
+                                                        <div className="font-medium text-[13px] text-[#e8eaf0]">Banking Progressivo</div>
+                                                        <div className="text-[11px] text-[#5a6272]">Milestone — accantona a ogni multiplo</div>
+                                                    </div>
+                                                    <div className={`text-sm font-bold min-w-[48px] text-right ${config.milestoneBankPercentage > 0 ? 'text-[#f59e0b]' : 'text-[#5a6272]'}`}>
+                                                        {config.milestoneBankPercentage}%
+                                                    </div>
+                                                </div>
+                                                <div className="px-6 pb-6">
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="100"
+                                                        step="5"
+                                                        value={config.milestoneBankPercentage}
+                                                        style={{
+                                                            accentColor: '#f59e0b',
+                                                            background: getSliderGradient(config.milestoneBankPercentage, '#f59e0b')
+                                                        }}
+                                                        onChange={(e) => setConfig({ ...config, milestoneBankPercentage: parseInt(e.target.value) || 0 })}
+                                                        className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                                                    />
+                                                </div>
                                             </div>
                                         </>
                                     )}
-                                </div>
 
-                                {!isAsymmetricTwin && (
-                                    <div>
-                                        <div className="flex gap-4 w-full">
-                                            {/* RISK REWARD INPUT */}
-                                            <div className="relative group flex-1 mt-2">
-                                                <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 text-[9px] text-[#5a6272] uppercase tracking-widest z-10 group-focus-within:text-[#00d4aa] transition-colors">Risk:Reward</div>
-                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#5a6272] text-sm group-focus-within:text-[#00d4aa]">1 :</span>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0.01"
-                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl pl-10 pr-4 py-3 text-sm text-[#e8eaf0]"
-                                                    value={parseFloat((config.quota - 1).toFixed(2))}
-                                                    onChange={(e) => {
-                                                        const q = (parseFloat(e.target.value) || 0) + 1;
-                                                        setConfig({ ...config, quota: q });
-                                                    }}
-                                                />
+                                    {config.role === 'twin' && (
+                                        <div className="px-6 py-10 text-center space-y-3">
+                                            <div className="text-[#5a6272] text-[11px] italic uppercase tracking-widest px-10">
+                                                Banking non disponibile in modalità Twin Trading.<br />
                                             </div>
-                                            {/* QUOTA INPUT */}
-                                            <div className="relative group flex-1 mt-2">
-                                                <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 text-[9px] text-[#5a6272] uppercase tracking-widest z-10 group-focus-within:text-[#00d4aa] transition-colors">Quota</div>
-                                                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#5a6272] text-sm group-focus-within:text-[#00d4aa]">@</span>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="1.01"
-                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl pl-8 pr-4 py-3 text-sm text-[#e8eaf0]"
-                                                    value={parseFloat(config.quota.toFixed(2))}
-                                                    onChange={(e) => {
-                                                        const q = parseFloat(e.target.value) || 1.01;
-                                                        setConfig({ ...config, quota: q });
-                                                    }}
-                                                />
-                                            </div>
-                                            {/* COMMISSION INPUT */}
-                                            <div className="relative group flex-1 mt-2">
-                                                <div className="absolute top-[-10px] left-3 bg-[#0f1623] px-1 text-[9px] text-[#5a6272] uppercase tracking-widest z-10 group-focus-within:text-[#00d4aa] transition-colors">Comm. (%)</div>
-                                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#5a6272] text-[10px] group-focus-within:text-[#00d4aa]">%</span>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0"
-                                                    className="w-full bg-[#1e2329] border border-white/5 focus:border-[#00d4aa]/50 focus:bg-[#00d4aa]/5 transition-all outline-none rounded-xl px-4 py-3 text-sm text-[#e8eaf0]"
-                                                    value={config.tradingCommission || 0}
-                                                    onChange={(e) => setConfig({ ...config, tradingCommission: parseFloat(e.target.value) || 0 })}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* BANKING & CRESCITA CARD */}
-                        <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors flex flex-col">
-                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
-                                <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-[#00d4aa]/10 flex items-center justify-center text-[#00d4aa] text-sm">
-                                        <TrendingUp size={16} />
-                                    </div>
-                                    Banking & Crescita
-                                </div>
-                            </div>
-
-                            <div className="flex-1 divide-y divide-white/5">
-                                {config.role !== 'slave' && config.role !== 'twin' && (
-                                    <>
-                                        {/* TARGET SETTIMANALE */}
-                                        <div className="group transition-colors hover:bg-[#181c21]">
-                                            <div className="px-6 py-4 flex items-center justify-between gap-4">
-                                                <div>
-                                                    <div className="font-medium text-[13px] text-[#e8eaf0]">Target Settimanale</div>
-                                                    <div className="text-[11px] text-[#5a6272]">Obiettivo di crescita — +€{Math.ceil((config.weeklyTargetPercentage / 100) * effectiveCapital).toLocaleString('it-IT')}</div>
-                                                </div>
-                                                <div className={`text-sm font-bold min-w-[48px] text-right ${config.weeklyTargetPercentage > 0 ? 'text-[#00d4aa]' : 'text-[#5a6272]'}`}>
-                                                    {Math.ceil(config.weeklyTargetPercentage)}%
-                                                </div>
-                                            </div>
-                                            <div className="px-6 pb-6">
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max="100"
-                                                    step="0.1"
-                                                    value={config.weeklyTargetPercentage}
-                                                    style={{
-                                                        accentColor: '#00d4aa',
-                                                        background: getSliderGradient(config.weeklyTargetPercentage, '#00d4aa')
-                                                    }}
-                                                    onChange={(e) => setConfig({ ...config, weeklyTargetPercentage: parseFloat(e.target.value) || 0 })}
-                                                    className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        {/* BANKING TARGET */}
-                                        <div className="group transition-colors hover:bg-[#181c21]">
-                                            <div className="px-6 py-4 flex items-center justify-between gap-4">
-                                                <div>
-                                                    <div className="font-medium text-[13px] text-[#e8eaf0]">Banking Target Sett.</div>
-                                                    <div className="text-[11px] text-[#5a6272]">Accantonamento post-chiusura ciclo</div>
-                                                </div>
-                                                <div className={`text-sm font-bold min-w-[48px] text-right ${config.accumulationPercent > 0 ? 'text-[#00d4aa]' : 'text-[#5a6272]'}`}>
-                                                    {config.accumulationPercent}%
-                                                </div>
-                                            </div>
-                                            <div className="px-6 pb-6">
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max="50"
-                                                    step="5"
-                                                    value={config.accumulationPercent}
-                                                    style={{
-                                                        accentColor: '#00d4aa',
-                                                        background: getSliderGradient((config.accumulationPercent / 50) * 100, '#00d4aa')
-                                                    }}
-                                                    onChange={(e) => setConfig({ ...config, accumulationPercent: parseInt(e.target.value) || 0 })}
-                                                    className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        {/* BANKING PROGRESSIVO */}
-                                        <div className="group transition-colors hover:bg-[#181c21]">
-                                            <div className="px-6 py-4 flex items-center justify-between gap-4">
-                                                <div>
-                                                    <div className="font-medium text-[13px] text-[#e8eaf0]">Banking Progressivo</div>
-                                                    <div className="text-[11px] text-[#5a6272]">Milestone — accantona a ogni multiplo</div>
-                                                </div>
-                                                <div className={`text-sm font-bold min-w-[48px] text-right ${config.milestoneBankPercentage > 0 ? 'text-[#f59e0b]' : 'text-[#5a6272]'}`}>
-                                                    {config.milestoneBankPercentage}%
-                                                </div>
-                                            </div>
-                                            <div className="px-6 pb-6">
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max="100"
-                                                    step="5"
-                                                    value={config.milestoneBankPercentage}
-                                                    style={{
-                                                        accentColor: '#f59e0b',
-                                                        background: getSliderGradient(config.milestoneBankPercentage, '#f59e0b')
-                                                    }}
-                                                    onChange={(e) => setConfig({ ...config, milestoneBankPercentage: parseInt(e.target.value) || 0 })}
-                                                    className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                                                />
-                                            </div>
-                                        </div>
-                                    </>
-                                )}
-
-                                {config.role === 'twin' && (
-                                    <div className="px-6 py-10 text-center space-y-3">
-                                        <div className="text-[#5a6272] text-[11px] italic uppercase tracking-widest px-10">
-                                            Banking non disponibile in modalità Twin Trading.<br />
-                                        </div>
-                                        <div className="text-[10px] text-[#5a6272]/60 px-8 leading-relaxed">
-                                            Il Twin Trading gestisce due flussi speculari dove il profitto è calcolato sull'intero sistema.
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* RED LINE */}
-                                <div className="group transition-colors hover:bg-[#181c21] relative">
-                                    <div className="px-6 py-4 flex items-center justify-between gap-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-1.5 bg-[#ff4d6a]/10 rounded-lg text-[#ff4d6a]">
-                                                <RotateCcw size={14} />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-[13px] text-[#e8eaf0]">Red Line</div>
-                                                <div className="text-[11px] text-[#ff4d6a]/70 font-medium">Max perdite consecutive — tolleranza</div>
-                                            </div>
-                                        </div>
-                                        <div className={`text-sm font-bold min-w-[48px] text-right text-[#ff4d6a]`}>
-                                            {config.maxConsecutiveLosses || 0}
-                                        </div>
-                                    </div>
-                                    <div className="px-6 pb-6">
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="10"
-                                            step="1"
-                                            value={config.maxConsecutiveLosses || 0}
-                                            style={{
-                                                accentColor: '#ff4d6a',
-                                                background: getSliderGradient((config.maxConsecutiveLosses || 0) * 10, '#ff4d6a')
-                                            }}
-                                            onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) || 0 })}
-                                            className="w-full h-1 rounded-full appearance-none cursor-pointer"
-                                        />
-                                    </div>
-                                    <div className="px-6 py-2 bg-black/5 border-t border-white/5 flex items-center gap-2 text-[#5a6272] text-[10px]">
-                                        <span className="text-[#00d4aa]">↳</span> Tolleranza: {config.maxConsecutiveLosses} rossi consecutivi prima dello stop.
-                                    </div>
-                                </div>
-
-                                {/* ELASTIC HORIZON */}
-                                <div className="group transition-colors hover:bg-[#181c21] relative">
-                                    <div className="px-6 py-4 flex items-center justify-between gap-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className={`p-1.5 rounded-lg transition-colors ${config.elasticConfig?.enabled ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-700/20 text-slate-500'}`}>
-                                                <Shield size={14} />
-                                            </div>
-                                            <div>
-                                                <div className="font-medium text-[13px] text-[#e8eaf0]">Ammortizzatore Elastico</div>
-                                                <div className="text-[11px] text-[#8a919f] font-medium">Dynamic Horizon Recovery Mode</div>
-                                            </div>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setConfig({
-                                                ...config,
-                                                elasticConfig: {
-                                                    ...config.elasticConfig!,
-                                                    enabled: !config.elasticConfig?.enabled
-                                                }
-                                            })}
-                                            className={`w-8 h-4 rounded-full transition-all relative ${config.elasticConfig?.enabled ? 'bg-indigo-500' : 'bg-slate-700'}`}
-                                        >
-                                            <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${config.elasticConfig?.enabled ? 'right-0.5' : 'left-0.5'}`}></div>
-                                        </button>
-                                    </div>
-
-                                    {config.elasticConfig?.enabled && (
-                                        <div className="px-6 pb-6 space-y-4 animate-in slide-in-from-top-2">
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Trigger (Consec. Loss)</label>
-                                                    <input
-                                                        type="number"
-                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
-                                                        value={config.elasticConfig.triggerOnLosses}
-                                                        onChange={(e) => setConfig({
-                                                            ...config,
-                                                            elasticConfig: { ...config.elasticConfig!, triggerOnLosses: parseInt(e.target.value) || 0 }
-                                                        })}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Max Estensioni</label>
-                                                    <input
-                                                        type="number"
-                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
-                                                        value={config.elasticConfig.maxStretches}
-                                                        onChange={(e) => setConfig({
-                                                            ...config,
-                                                            elasticConfig: { ...config.elasticConfig!, maxStretches: parseInt(e.target.value) || 0 }
-                                                        })}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Aggiungi Eventi</label>
-                                                    <input
-                                                        type="number"
-                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
-                                                        value={config.elasticConfig.addEvents}
-                                                        onChange={(e) => setConfig({
-                                                            ...config,
-                                                            elasticConfig: { ...config.elasticConfig!, addEvents: parseInt(e.target.value) || 0 }
-                                                        })}
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Aggiungi Vittorie</label>
-                                                    <input
-                                                        type="number"
-                                                        className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
-                                                        value={config.elasticConfig.addWins}
-                                                        onChange={(e) => setConfig({
-                                                            ...config,
-                                                            elasticConfig: { ...config.elasticConfig!, addWins: Math.min(config.elasticConfig!.addEvents, parseInt(e.target.value) || 0) }
-                                                        })}
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className="text-[9px] text-indigo-400 font-medium italic">
-                                                Note: L'estensione abbassa lo stake ricalcolando il piano su un orizzonte temporale più lungo.
+                                            <div className="text-[10px] text-[#5a6272]/60 px-8 leading-relaxed">
+                                                Il Twin Trading gestisce due flussi speculari dove il profitto è calcolato sull'intero sistema.
                                             </div>
                                         </div>
                                     )}
+
+                                    {/* RED LINE */}
+                                    <div className="group transition-colors hover:bg-[#181c21] relative">
+                                        <div className="px-6 py-4 flex items-center justify-between gap-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-1.5 bg-[#ff4d6a]/10 rounded-lg text-[#ff4d6a]">
+                                                    <RotateCcw size={14} />
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-[13px] text-[#e8eaf0]">Red Line</div>
+                                                    <div className="text-[11px] text-[#ff4d6a]/70 font-medium">Max perdite consecutive — tolleranza</div>
+                                                </div>
+                                            </div>
+                                            <div className={`text-sm font-bold min-w-[48px] text-right text-[#ff4d6a]`}>
+                                                {config.maxConsecutiveLosses || 0}
+                                            </div>
+                                        </div>
+                                        <div className="px-6 pb-6">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="10"
+                                                step="1"
+                                                value={config.maxConsecutiveLosses || 0}
+                                                style={{
+                                                    accentColor: '#ff4d6a',
+                                                    background: getSliderGradient((config.maxConsecutiveLosses || 0) * 10, '#ff4d6a')
+                                                }}
+                                                onChange={(e) => setConfig({ ...config, maxConsecutiveLosses: parseInt(e.target.value) || 0 })}
+                                                className="w-full h-1 rounded-full appearance-none cursor-pointer"
+                                            />
+                                        </div>
+                                        <div className="px-6 py-2 bg-black/5 border-t border-white/5 flex items-center gap-2 text-[#5a6272] text-[10px]">
+                                            <span className="text-[#00d4aa]">↳</span> Tolleranza: {config.maxConsecutiveLosses} rossi consecutivi prima dello stop.
+                                        </div>
+                                    </div>
+
+                                    {/* ELASTIC HORIZON */}
+                                    <div className="group transition-colors hover:bg-[#181c21] relative">
+                                        <div className="px-6 py-4 flex items-center justify-between gap-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`p-1.5 rounded-lg transition-colors ${config.elasticConfig?.enabled ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-700/20 text-slate-500'}`}>
+                                                    <Shield size={14} />
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-[13px] text-[#e8eaf0]">Ammortizzatore Elastico</div>
+                                                    <div className="text-[11px] text-[#8a919f] font-medium">Dynamic Horizon Recovery Mode</div>
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setConfig({
+                                                    ...config,
+                                                    elasticConfig: {
+                                                        ...config.elasticConfig!,
+                                                        enabled: !config.elasticConfig?.enabled
+                                                    }
+                                                })}
+                                                className={`w-8 h-4 rounded-full transition-all relative ${config.elasticConfig?.enabled ? 'bg-indigo-500' : 'bg-slate-700'}`}
+                                            >
+                                                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${config.elasticConfig?.enabled ? 'right-0.5' : 'left-0.5'}`}></div>
+                                            </button>
+                                        </div>
+
+                                        {config.elasticConfig?.enabled && (
+                                            <div className="px-6 pb-6 space-y-4 animate-in slide-in-from-top-2">
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div>
+                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Trigger (Consec. Loss)</label>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
+                                                            value={config.elasticConfig.triggerOnLosses}
+                                                            onChange={(e) => setConfig({
+                                                                ...config,
+                                                                elasticConfig: { ...config.elasticConfig!, triggerOnLosses: parseInt(e.target.value) || 0 }
+                                                            })}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Max Estensioni</label>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
+                                                            value={config.elasticConfig.maxStretches}
+                                                            onChange={(e) => setConfig({
+                                                                ...config,
+                                                                elasticConfig: { ...config.elasticConfig!, maxStretches: parseInt(e.target.value) || 0 }
+                                                            })}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Aggiungi Eventi</label>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
+                                                            value={config.elasticConfig.addEvents}
+                                                            onChange={(e) => setConfig({
+                                                                ...config,
+                                                                elasticConfig: { ...config.elasticConfig!, addEvents: parseInt(e.target.value) || 0 }
+                                                            })}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[9px] uppercase tracking-wider text-[#5a6272] mb-1.5 block">Aggiungi Vittorie</label>
+                                                        <input
+                                                            type="number"
+                                                            className="w-full bg-[#1e2329] border border-white/5 focus:border-indigo-500/50 focus:bg-indigo-500/5 transition-all outline-none rounded-xl px-3 py-2 text-[11px] text-[#e8eaf0]"
+                                                            value={config.elasticConfig.addWins}
+                                                            onChange={(e) => setConfig({
+                                                                ...config,
+                                                                elasticConfig: { ...config.elasticConfig!, addWins: Math.min(config.elasticConfig!.addEvents, parseInt(e.target.value) || 0) }
+                                                            })}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="text-[9px] text-indigo-400 font-medium italic">
+                                                    Note: L'estensione abbassa lo stake ricalcolando il piano su un orizzonte temporale più lungo.
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* LINK STRATEGY */}
-                        <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors">
-                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
-                                <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-[#4f8ef7]/10 flex items-center justify-center text-[#4f8ef7] text-sm">
-                                        <Link size={16} />
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* LINK STRATEGY */}
+                            <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors">
+                                <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                                    <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-[#4f8ef7]/10 flex items-center justify-center text-[#4f8ef7] text-sm">
+                                            <Link size={16} />
+                                        </div>
+                                        Link Strategy
                                     </div>
-                                    Link Strategy
+                                </div>
+                                <div className="p-0">
+                                    <div className="grid grid-cols-5 gap-1 p-4 bg-black/10">
+                                        {['standard', 'differential', 'twin'].map((role) => (
+                                            <button
+                                                key={role}
+                                                type="button"
+                                                onClick={() => {
+                                                    const updates: any = { role: role as any };
+                                                    if (role === 'twin') {
+                                                        updates.accumulationPercent = 0;
+                                                        updates.weeklyTargetPercentage = 0;
+                                                        updates.milestoneBankPercentage = 0;
+                                                    }
+                                                    setConfig({ ...config, ...updates });
+                                                }}
+                                                className={`py-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${config.role === role
+                                                    ? 'bg-[#4f8ef7]/10 border-[#4f8ef7]/30 text-[#4f8ef7] shadow-lg shadow-[#4f8ef7]/5'
+                                                    : 'bg-transparent border-transparent text-[#5a6272] hover:text-[#8a919f]'
+                                                    }`}
+                                            >
+                                                <span className="text-sm">
+                                                    {role === 'master' && <Crown size={18} />}
+                                                    {role === 'slave' && <Link size={18} />}
+                                                    {role === 'standard' && <Calculator size={18} />}
+                                                    {role === 'differential' && <TrendingUp size={18} />}
+                                                    {role === 'twin' && <Shuffle size={18} />}
+                                                </span>
+                                                <span className="text-[9px] uppercase tracking-widest font-bold">{role === 'differential' ? 'diff' : role}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="p-6 text-[11px] text-[#5a6272] italic leading-relaxed">
+                                        {config.role === 'master' && "Modalità Master: Questo piano alimenterà regolarmente un profilo Slave con parte dei propri profitti."}
+                                        {config.role === 'slave' && "Modalità Slave: Questo piano userà capitale virtuale alimentato dal profitto del Master collegato."}
+                                        {config.role === 'standard' && "Modalità Standard: Operatività indipendente senza flussi di profitto condivisi."}
+                                        {config.role === 'differential' && "Modalità Differenziale: Gestisce due istanze speculari, visualizzando solo lo stake differenziale per ottimizzare il capitale impegnato."}
+                                        {config.role === 'twin' && "Modalità Twin Trading: Due Masanielli indipendenti e speculari (Long/Short) che non comunicano. Utile per isolare i drawdown sui trade contro-trend."}
+                                        {config.role === 'slave' && (
+                                            <div className="mt-4 not-italic">
+                                                <label className="text-[10px] uppercase tracking-wider text-[#5a6272] block mb-2">Collega a Master</label>
+                                                <select
+                                                    className="w-full bg-[#1e2329] border border-white/5 transition-all outline-none rounded-xl px-4 py-3 text-[11px] text-[#e8eaf0] cursor-pointer"
+                                                    value={config.feedSource?.masterPlanId || ''}
+                                                    onChange={(e) => setConfig({
+                                                        ...config,
+                                                        feedSource: { ...config.feedSource!, masterPlanId: e.target.value }
+                                                    })}
+                                                    required={config.role === 'slave'}
+                                                >
+                                                    <option value="">— Seleziona Master —</option>
+                                                    {activeInstances.filter(i => i.config.role === 'master').map(i => (
+                                                        <option key={i.id} value={i.id}>{i.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                            <div className="p-0">
-                                <div className="grid grid-cols-5 gap-1 p-4 bg-black/10">
-                                    {['standard', 'differential', 'twin'].map((role) => (
-                                        <button
-                                            key={role}
-                                            type="button"
-                                            onClick={() => {
-                                                const updates: any = { role: role as any };
-                                                if (role === 'twin') {
-                                                    updates.accumulationPercent = 0;
-                                                    updates.weeklyTargetPercentage = 0;
-                                                    updates.milestoneBankPercentage = 0;
-                                                }
-                                                setConfig({ ...config, ...updates });
-                                            }}
-                                            className={`py-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${config.role === role
-                                                ? 'bg-[#4f8ef7]/10 border-[#4f8ef7]/30 text-[#4f8ef7] shadow-lg shadow-[#4f8ef7]/5'
-                                                : 'bg-transparent border-transparent text-[#5a6272] hover:text-[#8a919f]'
-                                                }`}
-                                        >
-                                            <span className="text-sm">
-                                                {role === 'master' && <Crown size={18} />}
-                                                {role === 'slave' && <Link size={18} />}
-                                                {role === 'standard' && <Calculator size={18} />}
-                                                {role === 'differential' && <TrendingUp size={18} />}
-                                                {role === 'twin' && <Shuffle size={18} />}
-                                            </span>
-                                            <span className="text-[9px] uppercase tracking-widest font-bold">{role === 'differential' ? 'diff' : role}</span>
-                                        </button>
+
+                            {/* GATEKEEPER CHECKLIST */}
+                            <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors flex flex-col">
+                                <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+                                    <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-lg bg-[#f59e0b]/10 flex items-center justify-center text-[#f59e0b] text-sm">
+                                            <ClipboardCheck size={16} />
+                                        </div>
+                                        Gatekeeper Checklist
+                                    </div>
+                                    <span className="text-[9px] text-[#5a6272] tracking-[0.2em]">{(config.checklistTemplate || []).length} voci</span>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto max-h-[350px] divide-y divide-white/5">
+                                    {(config.checklistTemplate || []).map((item, index) => (
+                                        <div key={index} className="group px-6 py-4 flex items-center gap-4 hover:bg-white/[0.02] transition-colors">
+                                            <div className="w-5 h-5 rounded-md border border-white/10 bg-[#1e2329] flex items-center justify-center text-[#00d4aa] text-[10px] shrink-0">
+                                                <Check size={10} />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                value={item}
+                                                onChange={(e) => {
+                                                    const newTemplate = [...(config.checklistTemplate || [])];
+                                                    newTemplate[index] = e.target.value;
+                                                    setConfig({ ...config, checklistTemplate: newTemplate });
+                                                }}
+                                                className="flex-1 bg-transparent border-none outline-none text-[#8a919f] group-hover:text-[#e8eaf0] transition-colors text-xs"
+                                                placeholder="Es: Trend H1 confermato?"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const newTemplate = (config.checklistTemplate || []).filter((_, i) => i !== index);
+                                                    setConfig({ ...config, checklistTemplate: newTemplate });
+                                                }}
+                                                className="text-[#5a6272] hover:text-[#ff4d6a] transition-colors opacity-0 group-hover:opacity-100 p-1"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
+                                        </div>
                                     ))}
                                 </div>
-                                <div className="p-6 text-[11px] text-[#5a6272] italic leading-relaxed">
-                                    {config.role === 'master' && "Modalità Master: Questo piano alimenterà regolarmente un profilo Slave con parte dei propri profitti."}
-                                    {config.role === 'slave' && "Modalità Slave: Questo piano userà capitale virtuale alimentato dal profitto del Master collegato."}
-                                    {config.role === 'standard' && "Modalità Standard: Operatività indipendente senza flussi di profitto condivisi."}
-                                    {config.role === 'differential' && "Modalità Differenziale: Gestisce due istanze speculari, visualizzando solo lo stake differenziale per ottimizzare il capitale impegnato."}
-                                    {config.role === 'twin' && "Modalità Twin Trading: Due Masanielli indipendenti e speculari (Long/Short) che non comunicano. Utile per isolare i drawdown sui trade contro-trend."}
-                                    {config.role === 'slave' && (
-                                        <div className="mt-4 not-italic">
-                                            <label className="text-[10px] uppercase tracking-wider text-[#5a6272] block mb-2">Collega a Master</label>
-                                            <select
-                                                className="w-full bg-[#1e2329] border border-white/5 transition-all outline-none rounded-xl px-4 py-3 text-[11px] text-[#e8eaf0] cursor-pointer"
-                                                value={config.feedSource?.masterPlanId || ''}
-                                                onChange={(e) => setConfig({
-                                                    ...config,
-                                                    feedSource: { ...config.feedSource!, masterPlanId: e.target.value }
-                                                })}
-                                                required={config.role === 'slave'}
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const newTemplate = [...(config.checklistTemplate || []), ''];
+                                        setConfig({ ...config, checklistTemplate: newTemplate });
+                                    }}
+                                    className="mx-6 my-6 p-3 rounded-xl border border-dashed border-white/10 hover:border-[#00d4aa]/30 hover:bg-[#00d4aa]/5 transition-all flex items-center gap-3 text-[#5a6272] hover:text-[#00d4aa] text-xs"
+                                >
+                                    <Plus size={14} />
+                                    <span className="font-medium">Aggiungi voce checklist</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* REGOLE ATTIVE */}
+                        <div className="pt-4">
+                            <div className="flex items-center justify-between mb-4 px-2">
+                                <div className="font-bold text-[10px] uppercase tracking-[0.2em] text-[#5a6272] flex items-center gap-3">
+                                    <div className="w-5 h-[1px] bg-[#5a6272]"></div>
+                                    Regole Attive
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (selectedRules.length === AVAILABLE_RULES.length) {
+                                            setSelectedRules([]);
+                                        } else {
+                                            setSelectedRules(AVAILABLE_RULES.map(r => r.id));
+                                        }
+                                    }}
+                                    className="text-[10px] uppercase font-bold text-[#5a6272] hover:text-[#00d4aa] transition-colors"
+                                >
+                                    {selectedRules.length === AVAILABLE_RULES.length ? 'Disattiva Tutti' : 'Attiva Tutti'}
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {AVAILABLE_RULES
+                                    .map(rule => {
+                                        const isActive = selectedRules.includes(rule.id);
+                                        return (
+                                            <div
+                                                key={rule.id}
+                                                onClick={() => toggleRule(rule.id)}
+                                                className={`p-4 rounded-2xl border transition-all cursor-pointer relative group ${isActive
+                                                    ? 'bg-[#00d4aa]/5 border-[#00d4aa]/20'
+                                                    : 'bg-[#181c21] border-white/5 hover:border-white/10'
+                                                    }`}
                                             >
-                                                <option value="">— Seleziona Master —</option>
-                                                {activeInstances.filter(i => i.config.role === 'master').map(i => (
-                                                    <option key={i.id} value={i.id}>{i.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    )}
+                                                <div className={`absolute top-4 right-4 w-8 h-4.5 rounded-full border transition-all ${isActive
+                                                    ? 'bg-[#00d4aa]/20 border-[#00d4aa] after:left-[15px]'
+                                                    : 'bg-[#1e2329] border-white/10 after:left-[2px]'
+                                                    } after:content-[''] after:absolute after:top-[2px] after:w-3 after:h-3 after:rounded-full after:bg-[#5a6272] after:transition-all ${isActive ? 'after:bg-[#00d4aa]' : ''}`}></div>
+                                                <div className={`font-medium text-[12px] mb-1 pr-10 ${isActive ? 'text-[#e8eaf0]' : 'text-[#8a919f]'}`}>{rule.label}</div>
+                                                <div className="text-[10px] text-[#5a6272] leading-relaxed line-clamp-2">{rule.desc}</div>
+                                            </div>
+                                        );
+                                    })}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* COMPACT FLOATING ACTION BAR - ABSOLUTE */}
+                    <div className="absolute bottom-[5px] left-1/2 -translate-x-1/2 w-auto min-w-[280px] max-w-[95%] z-[1000] animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="bg-[#111823]/95 backdrop-blur-xl border border-white/10 rounded-full px-5 py-2 flex items-center justify-between shadow-[0_10px_40px_rgba(0,0,0,0.6)] ring-1 ring-white/5">
+                            <div className="flex items-center gap-3 pr-4 border-r border-white/5">
+                                <div className="relative">
+                                    <div className="w-2 h-2 rounded-full bg-[#00d4aa] shadow-[0_0_10px_rgba(0,212,170,0.6)]"></div>
+                                    <div className="absolute inset-0 w-2 h-2 rounded-full bg-[#00d4aa] animate-ping opacity-30"></div>
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* GATEKEEPER CHECKLIST */}
-                        <div className="bg-[#0f1623] border border-white/5 rounded-2xl overflow-hidden hover:border-white/10 transition-colors flex flex-col">
-                            <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between">
-                                <div className="font-bold text-[11px] uppercase tracking-widest text-[#8a919f] flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-lg bg-[#f59e0b]/10 flex items-center justify-center text-[#f59e0b] text-sm">
-                                        <ClipboardCheck size={16} />
-                                    </div>
-                                    Gatekeeper Checklist
-                                </div>
-                                <span className="text-[9px] text-[#5a6272] tracking-[0.2em]">{(config.checklistTemplate || []).length} voci</span>
+                                <span className="text-[9px] text-[#e8eaf0] font-bold font-['DM_Mono'] uppercase tracking-[0.1em] opacity-60 whitespace-nowrap">Pronto</span>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto max-h-[350px] divide-y divide-white/5">
-                                {(config.checklistTemplate || []).map((item, index) => (
-                                    <div key={index} className="group px-6 py-4 flex items-center gap-4 hover:bg-white/[0.02] transition-colors">
-                                        <div className="w-5 h-5 rounded-md border border-white/10 bg-[#1e2329] flex items-center justify-center text-[#00d4aa] text-[10px] shrink-0">
-                                            <Check size={10} />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            value={item}
-                                            onChange={(e) => {
-                                                const newTemplate = [...(config.checklistTemplate || [])];
-                                                newTemplate[index] = e.target.value;
-                                                setConfig({ ...config, checklistTemplate: newTemplate });
-                                            }}
-                                            className="flex-1 bg-transparent border-none outline-none text-[#8a919f] group-hover:text-[#e8eaf0] transition-colors text-xs"
-                                            placeholder="Es: Trend H1 confermato?"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const newTemplate = (config.checklistTemplate || []).filter((_, i) => i !== index);
-                                                setConfig({ ...config, checklistTemplate: newTemplate });
-                                            }}
-                                            className="text-[#5a6272] hover:text-[#ff4d6a] transition-colors opacity-0 group-hover:opacity-100 p-1"
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                    </div>
-                                ))}
+                            <div className="flex items-center gap-4 pl-1">
+                                <button
+                                    type="button"
+                                    onClick={handleSubmit}
+                                    className="bg-[#00f2c3] hover:bg-[#00ffd0] transition-all text-[#000] px-8 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.1em] shadow-[0_5px_15_rgba(0,242,195,0.2)] hover:shadow-[0_8px_25_rgba(0,242,195,0.3)] active:scale-95 transition-transform flex items-center gap-2"
+                                >
+                                    <Plus size={14} />
+                                    Crea Ciclo
+                                </button>
                             </div>
-
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    const newTemplate = [...(config.checklistTemplate || []), ''];
-                                    setConfig({ ...config, checklistTemplate: newTemplate });
-                                }}
-                                className="mx-6 my-6 p-3 rounded-xl border border-dashed border-white/10 hover:border-[#00d4aa]/30 hover:bg-[#00d4aa]/5 transition-all flex items-center gap-3 text-[#5a6272] hover:text-[#00d4aa] text-xs"
-                            >
-                                <Plus size={14} />
-                                <span className="font-medium">Aggiungi voce checklist</span>
-                            </button>
                         </div>
                     </div>
 
-                    {/* REGOLE ATTIVE */}
-                    <div className="pt-4">
-                        <div className="flex items-center justify-between mb-4 px-2">
-                            <div className="font-bold text-[10px] uppercase tracking-[0.2em] text-[#5a6272] flex items-center gap-3">
-                                <div className="w-5 h-[1px] bg-[#5a6272]"></div>
-                                Regole Attive
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (selectedRules.length === AVAILABLE_RULES.length) {
-                                        setSelectedRules([]);
-                                    } else {
-                                        setSelectedRules(AVAILABLE_RULES.map(r => r.id));
-                                    }
-                                }}
-                                className="text-[10px] uppercase font-bold text-[#5a6272] hover:text-[#00d4aa] transition-colors"
-                            >
-                                {selectedRules.length === AVAILABLE_RULES.length ? 'Disattiva Tutti' : 'Attiva Tutti'}
-                            </button>
-                        </div>
+                    {/* CUSTOM FONT INJECTION */}
+                    <style dangerouslySetInnerHTML={{
+                        __html: `
+                        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&display=swap');
+                        
+                        input[type=range]::-webkit-slider-thumb {
+                            -webkit-appearance: none;
+                            width: 16px;
+                            height: 16px;
+                            border-radius: 50%;
+                            background: white;
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+                            transition: transform 0.1s;
+                        }
+                        
+                        input[type=range]:hover::-webkit-slider-thumb {
+                            transform: scale(1.2);
+                        }
+                    `}} />
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {AVAILABLE_RULES
-                                .map(rule => {
-                                    const isActive = selectedRules.includes(rule.id);
-                                    return (
-                                        <div
-                                            key={rule.id}
-                                            onClick={() => toggleRule(rule.id)}
-                                            className={`p-4 rounded-2xl border transition-all cursor-pointer relative group ${isActive
-                                                ? 'bg-[#00d4aa]/5 border-[#00d4aa]/20'
-                                                : 'bg-[#181c21] border-white/5 hover:border-white/10'
-                                                }`}
-                                        >
-                                            <div className={`absolute top-4 right-4 w-8 h-4.5 rounded-full border transition-all ${isActive
-                                                ? 'bg-[#00d4aa]/20 border-[#00d4aa] after:left-[15px]'
-                                                : 'bg-[#1e2329] border-white/10 after:left-[2px]'
-                                                } after:content-[''] after:absolute after:top-[2px] after:w-3 after:h-3 after:rounded-full after:bg-[#5a6272] after:transition-all ${isActive ? 'after:bg-[#00d4aa]' : ''}`}></div>
-                                            <div className={`font-medium text-[12px] mb-1 pr-10 ${isActive ? 'text-[#e8eaf0]' : 'text-[#8a919f]'}`}>{rule.label}</div>
-                                            <div className="text-[10px] text-[#5a6272] leading-relaxed line-clamp-2">{rule.desc}</div>
-                                        </div>
-                                    );
-                                })}
-                        </div>
-                    </div>
-
-                </div >
-            </div >
-
-            {/* COMPACT FLOATING ACTION BAR - ABSOLUTE */}
-            < div className="absolute bottom-[5px] left-1/2 -translate-x-1/2 w-auto min-w-[280px] max-w-[95%] z-[1000] animate-in fade-in slide-in-from-bottom-4 duration-500" >
-                <div className="bg-[#111823]/95 backdrop-blur-xl border border-white/10 rounded-full px-5 py-2 flex items-center justify-between shadow-[0_10px_40px_rgba(0,0,0,0.6)] ring-1 ring-white/5">
-                    <div className="flex items-center gap-3 pr-4 border-r border-white/5">
-                        <div className="relative">
-                            <div className="w-2 h-2 rounded-full bg-[#00d4aa] shadow-[0_0_10px_rgba(0,212,170,0.6)]"></div>
-                            <div className="absolute inset-0 w-2 h-2 rounded-full bg-[#00d4aa] animate-ping opacity-30"></div>
-                        </div>
-                        <span className="text-[9px] text-[#e8eaf0] font-bold font-['DM_Mono'] uppercase tracking-[0.1em] opacity-60 whitespace-nowrap">Pronto</span>
-                    </div>
-
-                    <div className="flex items-center gap-4 pl-1">
-                        <button
-                            type="button"
-                            onClick={handleSubmit}
-                            className="bg-[#00f2c3] hover:bg-[#00ffd0] transition-all text-[#000] px-8 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.1em] shadow-[0_5px_15_rgba(0,242,195,0.2)] hover:shadow-[0_8px_25_rgba(0,242,195,0.3)] active:scale-95 transition-transform flex items-center gap-2"
-                        >
-                            <Plus size={14} />
-                            Crea Ciclo
-                        </button>
-                    </div>
+                    {/* Simulator Overlay */}
+                    {showSimulator && (
+                        <MasaSimulator
+                            initialConfig={config}
+                            onClose={() => setShowSimulator(false)}
+                        />
+                    )}
                 </div>
-            </div >
-
-            {/* CUSTOM FONT INJECTION */}
-            < style dangerouslySetInnerHTML={{
-                __html: `
-                @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&display=swap');
-                
-                input[type=range]::-webkit-slider-thumb {
-                    -webkit-appearance: none;
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 50%;
-                    background: white;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-                    transition: transform 0.1s;
-                }
-                
-                input[type=range]:hover::-webkit-slider-thumb {
-                    transform: scale(1.2);
-                }
-            `}} />
-
-            {/* Simulator Overlay */}
-            {showSimulator && (
-                <MasaSimulator
-                    initialConfig={config}
-                    onClose={() => setShowSimulator(false)}
-                />
-            )}
-        </div >
+            </div>
+        </div>
     );
 };
 

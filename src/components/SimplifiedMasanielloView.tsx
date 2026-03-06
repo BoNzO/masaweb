@@ -485,7 +485,6 @@ const SimplifiedMasanielloView: React.FC<SimplifiedMasanielloViewProps> = ({
                     isHedgeActive={!!session}
                     session={session}
                     nextStake={nextStake}
-                    hedgeMultiplier={instance.config.hedgeMultiplier || 0.2}
                     hedgeQuota={instance.config.hedgeQuota || 3}
                     onSpawnSon={currentPlan.hierarchyType === 'FATHER' ? () => onSpawnSon?.(currentPlan.quota) : undefined}
                     sonsCompleted={instance.sonsCompleted}

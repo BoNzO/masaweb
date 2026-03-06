@@ -603,6 +603,65 @@ export const useMultiMasaniello = () => {
                         };
                     }
                 }
+
+                // Complex state updates (Twins / Differential)
+                if (instance.type === 'twin' && instance.twinState) {
+                    const twin = instance.twinState;
+                    const longHasStarted = twin.planLong.events.filter(e => !e.isSystemLog).length > 0;
+                    const shortHasStarted = twin.planShort.events.filter(e => !e.isSystemLog).length > 0;
+                    let updatedTwin = { ...twin };
+
+                    if (!longHasStarted) {
+                        const qL = (newConfig.twinConfig?.quotaLong || newConfig.quota);
+                        const teL = (newConfig.twinConfig?.totalEventsLong || newConfig.totalEvents);
+                        const ewL = (newConfig.twinConfig?.expectedWinsLong || newConfig.expectedWins);
+                        const capLong = newConfig.twinConfig?.capitalLong || (newConfig.initialCapital / 2);
+
+                        updatedTwin.planLong = {
+                            ...createInitialPlan({
+                                ...newConfig,
+                                quota: qL,
+                                totalEvents: teL,
+                                expectedWins: ewL
+                            }, capLong),
+                            id: twin.planLong.id,
+                            hierarchyType: twin.planLong.hierarchyType
+                        };
+                    }
+
+                    if (!shortHasStarted) {
+                        const qS = (newConfig.twinConfig?.quotaShort || newConfig.quota);
+                        const teS = (newConfig.twinConfig?.totalEventsShort || newConfig.totalEvents);
+                        const ewS = (newConfig.twinConfig?.expectedWinsShort || newConfig.expectedWins);
+                        const capShort = newConfig.twinConfig?.capitalShort || (newConfig.initialCapital / 2);
+
+                        updatedTwin.planShort = {
+                            ...createInitialPlan({
+                                ...newConfig,
+                                quota: qS,
+                                totalEvents: teS,
+                                expectedWins: ewS
+                            }, capShort),
+                            id: twin.planShort.id,
+                            hierarchyType: twin.planShort.hierarchyType
+                        };
+                    }
+                    finalUpdates.twinState = updatedTwin;
+                } else if (instance.type === 'differential' && instance.differentialState) {
+                    const diff = instance.differentialState;
+                    const startedA = diff.planA.events.filter(e => !e.isSystemLog).length > 0;
+                    const startedB = diff.planB.events.filter(e => !e.isSystemLog).length > 0;
+
+                    if (!startedA && !startedB) {
+                        const freshPlan = createInitialPlan(newConfig, newConfig.initialCapital);
+                        finalUpdates.differentialState = {
+                            ...diff,
+                            planA: { ...freshPlan, id: diff.planA.id, hierarchyType: diff.planA.hierarchyType },
+                            planB: { ...freshPlan, id: diff.planB.id, hierarchyType: diff.planB.hierarchyType },
+                            realCapital: newConfig.initialCapital
+                        };
+                    }
+                }
             }
 
             let updatedPool = { ...prev.capitalPool };

@@ -157,14 +157,18 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
     const lossesShort = (currentShort.totalEvents - currentShort.remainingEvents) - winsShort;
     const eventsPlayedShort = currentShort.totalEvents - currentShort.remainingEvents;
 
-    // PERFORMANCE: Memoize history display to avoid expensive .filter().reverse() on every render
+    // PERFORMANCE: Memoize history display - include events from ALL past completed plans + current plan
     const displayHistoryLong = useMemo(() => {
-        return [...currentLong.events].filter(e => !e.isSystemLog).reverse();
-    }, [currentLong.events]);
+        const pastEvents = (twinState?.historyLong || []).flatMap(p => p.events.filter((e: any) => !e.isSystemLog));
+        const currentEvents = currentLong.events.filter(e => !e.isSystemLog);
+        return [...pastEvents, ...currentEvents].reverse();
+    }, [currentLong.events, twinState?.historyLong]);
 
     const displayHistoryShort = useMemo(() => {
-        return [...currentShort.events].filter(e => !e.isSystemLog).reverse();
-    }, [currentShort.events]);
+        const pastEvents = (twinState?.historyShort || []).flatMap(p => p.events.filter((e: any) => !e.isSystemLog));
+        const currentEvents = currentShort.events.filter(e => !e.isSystemLog);
+        return [...pastEvents, ...currentEvents].reverse();
+    }, [currentShort.events, twinState?.historyShort]);
 
     const twinHealth = useMemo(() => calculateTwinHealth(currentLong, currentShort), [currentLong, currentShort]);
 
@@ -509,33 +513,11 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                             <Shuffle size={24} />
                         </div>
                         <div>
-                            <h2 className="text-xl font-black text-white uppercase tracking-widest">Master Twin Trading</h2>
+                            <h2 className="text-xl font-black text-white uppercase tracking-widest">Masa Twin</h2>
                             <p className="text-xs text-slate-400 font-medium tracking-widest uppercase mt-1">Isolamento Direzionale</p>
                         </div>
                     </div>
 
-                    {onSaveLog && twinState && (
-                        <button
-                            onClick={() => {
-                                // Create a consolidated summary plan for the journal
-                                const consolidatedPlan = {
-                                    ...twinState.planLong,
-                                    id: `twin_log_${Date.now()}`,
-                                    name: `${instance.name} (Integrated Session)`,
-                                    startCapital: totalInitial,
-                                    currentCapital: totalCurrent,
-                                    events: [...(twinState.historyLong || []).flatMap(p => p.events), ...currentLong.events],
-                                    status: 'active'
-                                };
-                                onSaveLog(consolidatedPlan);
-                                alert('Sessione Twin salvata nel Diario!');
-                            }}
-                            className="group flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-[9px] font-black uppercase rounded-lg border border-indigo-500/20 transition-all active:scale-95"
-                        >
-                            <Save size={12} className="group-hover:scale-110 transition-transform" />
-                            Salva Diario
-                        </button>
-                    )}
                     <div className="flex flex-col items-end">
                         <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Masa Chiusi</div>
                         <div className="bg-black/30 border border-white/10 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-inner">
@@ -729,63 +711,90 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
             </div>
 
             {/* Summary Cards: aggregated + per-twin breakdown */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 mb-2">
-                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Capitale di partenza</div>
-                    <div className="flex items-center justify-between">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 mb-6 relative z-20">
+                {/* CAPITALE INIZIALE */}
+                <div className="bg-[#111823]/80 backdrop-blur-xl p-5 rounded-2xl border border-white/5 shadow-xl transition-all hover:border-white/10 group">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.22em] mb-4 opacity-70 group-hover:opacity-100 transition-opacity">CAPITALE INIZIALE</div>
+                    <div className="text-4xl font-black text-white mb-6 flex items-baseline gap-1">
+                        <span className="text-2xl opacity-50 font-medium">€</span>
+                        {Math.ceil(totalInitial).toLocaleString('it-IT')}
+                    </div>
+                    <div className="h-px bg-white/5 mb-6"></div>
+                    <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <div className="text-2xl font-black text-white">€{Math.ceil(totalInitial).toLocaleString('it-IT')}</div>
-                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">LONG</div>
+                            <div className="text-base font-black text-blue-400">€{Math.ceil(originLongCap).toLocaleString('it-IT')}</div>
                         </div>
-                        <div className="text-right">
-                            <div className="text-[11px] text-blue-400 font-bold">L: €{Math.ceil(originLongCap).toLocaleString('it-IT')}</div>
-                            <div className="text-[11px] text-purple-400 font-bold">S: €{Math.ceil(originShortCap).toLocaleString('it-IT')}</div>
+                        <div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">SHORT</div>
+                            <div className="text-base font-black text-pink-400">€{Math.ceil(originShortCap).toLocaleString('it-IT')}</div>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Capitale Target</div>
-                    <div className="flex items-center justify-between">
+                {/* OBIETTIVO TARGET */}
+                <div className="bg-[#111823]/80 backdrop-blur-xl p-5 rounded-2xl border border-white/5 shadow-xl transition-all hover:border-white/10 group">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.22em] mb-4 opacity-70 group-hover:opacity-100 transition-opacity">OBIETTIVO TARGET</div>
+                    <div className="text-4xl font-black text-white mb-6 flex items-baseline gap-1">
+                        <span className="text-2xl opacity-50 font-medium">€</span>
+                        {Math.ceil(currentLong.targetCapital + currentShort.targetCapital).toLocaleString('it-IT')}
+                    </div>
+                    <div className="h-px bg-white/5 mb-6"></div>
+                    <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <div className="text-2xl font-black text-white">€{Math.ceil(currentLong.targetCapital + currentShort.targetCapital).toLocaleString('it-IT')}</div>
-                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">LONG</div>
+                            <div className="text-base font-black text-blue-400">€{Math.ceil(currentLong.targetCapital).toLocaleString('it-IT')}</div>
                         </div>
-                        <div className="text-right">
-                            <div className="text-[11px] text-blue-400 font-bold">L: €{Math.ceil(currentLong.targetCapital).toLocaleString('it-IT')}</div>
-                            <div className="text-[11px] text-purple-400 font-bold">S: €{Math.ceil(currentShort.targetCapital).toLocaleString('it-IT')}</div>
+                        <div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">SHORT</div>
+                            <div className="text-base font-black text-pink-400">€{Math.ceil(currentShort.targetCapital).toLocaleString('it-IT')}</div>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Utile Netto</div>
-                    <div className="flex items-center justify-between">
+                {/* UTILE NETTO */}
+                <div className="bg-[#111823]/80 backdrop-blur-xl p-5 rounded-2xl border border-white/5 shadow-xl transition-all hover:border-white/10 group">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.22em] mb-4 opacity-70 group-hover:opacity-100 transition-opacity">UTILE NETTO</div>
+                    <div className={`text-4xl font-black mb-6 flex items-baseline gap-1 ${netProfit > 0 ? 'text-emerald-400' : netProfit < 0 ? 'text-rose-400' : 'text-white'}`}>
+                        <span className="text-2xl opacity-50 font-medium">€</span>
+                        {Math.ceil(netProfit).toLocaleString('it-IT')}
+                    </div>
+                    <div className="h-px bg-white/5 mb-6"></div>
+                    <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <div className={`text-2xl font-black ${netProfit > 0 ? 'text-emerald-400' : netProfit < 0 ? 'text-rose-400' : 'text-white'}`}> {netProfit > 0 ? '+' : ''}€{Math.ceil(netProfit).toLocaleString('it-IT')}</div>
-                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">LONG</div>
+                            <div className={`text-base font-black ${profitLong > 0 ? 'text-emerald-400' : profitLong < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {profitLong > 0 ? '+' : ''}€{Math.ceil(profitLong).toLocaleString('it-IT')}
+                            </div>
                         </div>
-                        <div className="text-right">
-                            <div className={`text-[11px] ${profitLong > 0 ? 'text-emerald-400' : profitLong < 0 ? 'text-rose-400' : 'text-slate-400'} font-bold`}>L: {profitLong > 0 ? '+' : ''}€{Math.ceil(profitLong).toLocaleString('it-IT')}</div>
-                            <div className={`text-[11px] ${profitShort > 0 ? 'text-emerald-400' : profitShort < 0 ? 'text-rose-400' : 'text-slate-400'} font-bold`}>S: {profitShort > 0 ? '+' : ''}€{Math.ceil(profitShort).toLocaleString('it-IT')}</div>
+                        <div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">SHORT</div>
+                            <div className={`text-base font-black ${profitShort > 0 ? 'text-emerald-400' : profitShort < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {profitShort > 0 ? '+' : ''}€{Math.ceil(profitShort).toLocaleString('it-IT')}
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div className="bg-[#0f1623] p-4 rounded-lg border border-white/5 shadow-lg">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-2">Utile Percentuale</div>
-                    <div className="flex items-center justify-between">
+                {/* PERFORMANCE */}
+                <div className="bg-[#111823]/80 backdrop-blur-xl p-5 rounded-2xl border border-white/5 shadow-xl transition-all hover:border-white/10 group">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.22em] mb-4 opacity-70 group-hover:opacity-100 transition-opacity">PERFORMANCE</div>
+                    <div className={`text-4xl font-black mb-6 ${netProfit > 0 ? 'text-amber-400' : netProfit < 0 ? 'text-rose-400' : 'text-white'}`}>
+                        {totalInitial > 0 ? ((netProfit / totalInitial) * 100).toFixed(0) : '0'}%
+                    </div>
+                    <div className="h-px bg-white/5 mb-6"></div>
+                    <div className="grid grid-cols-2 gap-4">
                         <div>
-                            {totalInitial > 0 ? (
-                                <div className="text-2xl font-black text-amber-400">{((netProfit / totalInitial) * 100).toFixed(0)}%</div>
-                            ) : (
-                                <div className="text-2xl font-black text-slate-400">N/A</div>
-                            )}
-                            <div className="text-[10px] text-slate-500 mt-1">Aggregato (L+S)</div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">LONG</div>
+                            <div className={`text-base font-black ${profitLong > 0 ? 'text-emerald-400' : profitLong < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {originLongCap > 0 ? Math.round(((profitLong / originLongCap) * 100)) : '0'}%
+                            </div>
                         </div>
-                        <div className="text-right">
-                            <div className="text-[11px] text-blue-400 font-bold">L: {originLongCap > 0 ? Math.round(((profitLong / originLongCap) * 100)) + '%' : 'N/A'}</div>
-                            <div className="text-[11px] text-purple-400 font-bold">S: {originShortCap > 0 ? Math.round(((profitShort / originShortCap) * 100)) + '%' : 'N/A'}</div>
+                        <div>
+                            <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1.5 opacity-40">SHORT</div>
+                            <div className={`text-base font-black ${profitShort > 0 ? 'text-emerald-400' : profitShort < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                                {originShortCap > 0 ? Math.round(((profitShort / originShortCap) * 100)) : '0'}%
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -882,9 +891,9 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                                 <div className="flex flex-col items-center">
                                     <div className="text-[10px] text-blue-400 font-black uppercase tracking-widest text-center">Hedge Configuration</div>
                                     <div className="text-[10px] text-white font-bold mt-2 bg-blue-500/20 px-4 py-1.5 rounded-full border border-blue-500/30">
-                                        STAKE HEDGE: €{instance.config.hedgeQuota && instance.config.hedgeQuota > 1
-                                            ? Math.ceil(stakeLong / (instance.config.hedgeQuota - 1))
-                                            : Math.ceil(stakeLong * (instance.config.hedgeMultiplier || 0.2))}
+                                        STAKE HEDGE: €{(instance.config.hedgeQuota && instance.config.hedgeQuota > 1
+                                            ? stakeLong / (instance.config.hedgeQuota - 1)
+                                            : stakeLong / (3.0 - 1)).toLocaleString('it-IT')}
                                     </div>
                                 </div>
 
@@ -1056,7 +1065,7 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                                                 </span>
                                                 <div className="flex flex-col">
                                                     <span className="text-xs text-slate-400 font-medium whitespace-nowrap">
-                                                        Stake: €{Math.ceil(ev.stake).toLocaleString('it-IT')}
+                                                        Stake: €{ev.stake.toLocaleString('it-IT')}
                                                     </span>
                                                     {(ev.isHedge || ev.note === 'edge') && (
                                                         <span className="text-[7px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1 rounded border border-blue-500/20 w-fit">
@@ -1171,9 +1180,9 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                                 <div className="flex flex-col items-center">
                                     <div className="text-[10px] text-purple-400 font-black uppercase tracking-widest text-center">Hedge Configuration</div>
                                     <div className="text-[10px] text-white font-bold mt-2 bg-purple-500/20 px-4 py-1.5 rounded-full border border-purple-500/30">
-                                        STAKE HEDGE: €{instance.config.hedgeQuota && instance.config.hedgeQuota > 1
-                                            ? Math.ceil(stakeShort / (instance.config.hedgeQuota - 1))
-                                            : Math.ceil(stakeShort * (instance.config.hedgeMultiplier || 0.2))}
+                                        STAKE HEDGE: €{(instance.config.hedgeQuota && instance.config.hedgeQuota > 1
+                                            ? stakeShort / (instance.config.hedgeQuota - 1)
+                                            : stakeShort / (3.0 - 1)).toLocaleString('it-IT')}
                                     </div>
                                 </div>
 
@@ -1345,7 +1354,7 @@ const TwinMasanielloView: React.FC<TwinMasanielloViewProps> = ({ instance, onUpd
                                                 </span>
                                                 <div className="flex flex-col">
                                                     <span className="text-xs text-slate-400 font-medium whitespace-nowrap">
-                                                        Stake: €{Math.ceil(ev.stake).toLocaleString('it-IT')}
+                                                        Stake: €{ev.stake.toLocaleString('it-IT')}
                                                     </span>
                                                     {(ev.isHedge || ev.note === 'edge') && (
                                                         <span className="text-[7px] font-black text-blue-400 uppercase tracking-tighter bg-blue-500/10 px-1 rounded border border-blue-500/20 w-fit">

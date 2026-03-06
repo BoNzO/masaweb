@@ -13,7 +13,6 @@ interface BetActionsCardProps {
     isHedgeActive?: boolean;
     session?: { main: boolean | null, hedge: boolean | null } | null;
     nextStake?: number;
-    hedgeMultiplier?: number;
     hedgeQuota?: number;
     onSpawnSon?: () => void;
     sonsCompleted?: number;
@@ -34,7 +33,6 @@ const BetActionsCard: React.FC<BetActionsCardProps> = ({
     isHedgeActive = false,
     session = null,
     nextStake = 0,
-    hedgeMultiplier = 0.2,
     hedgeQuota = 3,
     onSpawnSon,
     sonsCompleted = 0,
@@ -74,7 +72,7 @@ const BetActionsCard: React.FC<BetActionsCardProps> = ({
                     <textarea
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
-                        placeholder="Annota la qualità operativa o il motivo dell'ingresso..."
+                        placeholder="Aggiungi note..."
                         style={{
                             width: '100%',
                             minHeight: '54px',
@@ -274,7 +272,7 @@ const BetActionsCard: React.FC<BetActionsCardProps> = ({
                                     <Shield size={14} className={isHedgeActive ? 'animate-pulse text-white' : 'text-indigo-400'} />
                                 </div>
                                 <span style={{ textShadow: isHedgeActive ? '0 0 8px rgba(255,255,255,0.5)' : 'none' }}>
-                                    {isHedgeActive ? 'MODALITÀ HEDGE ATTIVA' : 'APRI COPERTURA (HEDGE)'}
+                                    {isHedgeActive ? 'HEDGE ATTIVO' : 'HEDGE'}
                                 </span>
                             </button>
 
@@ -294,7 +292,7 @@ const BetActionsCard: React.FC<BetActionsCardProps> = ({
                                                 <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.6)', fontWeight: 700 }}>
                                                     Stake: €{hedgeQuota > 1
                                                         ? Math.ceil(nextStake / (hedgeQuota - 1))
-                                                        : Math.ceil(nextStake * hedgeMultiplier)}
+                                                        : Math.ceil(nextStake / (3.0 - 1))}
                                                 </div>
                                             </div>
                                         </div>
@@ -465,7 +463,7 @@ const BetActionsCard: React.FC<BetActionsCardProps> = ({
                                     onMouseEnter={(e) => !isDisabled && (e.currentTarget.style.background = 'rgba(245,158,11,0.12)')}
                                     onMouseLeave={(e) => !isDisabled && (e.currentTarget.style.background = 'rgba(245,158,11,0.05)')}
                                 >
-                                    <Lock size={14} /> PRELEVA (LOCK PROFIT)
+                                    <Lock size={14} /> LOCK PROFIT
                                 </button>
                             )}
                         </div>
@@ -530,7 +528,7 @@ const BetActionsCard: React.FC<BetActionsCardProps> = ({
                             }}>
                                 <Plus size={14} />
                             </span>
-                            DELEGA A FIGLIO (RISCHIO FRAZIONATO)
+                            CREA MASA FIGLIO
                         </button>
                     </div>
                 )}
